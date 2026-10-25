@@ -2112,10 +2112,30 @@ TAB_RENDER.stats = async () => {
         <div><dt>${tx('Najvyššia snehová pokrývka', 'Nejvyšší sněhová pokrývka')}</dt><dd>${rec(C.records.snow, 'cm')}</dd></div>
         <div><dt>${tx('Najsilnejší náraz vetra', 'Nejsilnější náraz větru')}</dt><dd>${C.records.gust ? `${r0(C.records.gust[0] * 3.6)} km/h <small>(${fmtDateLong.format(new Date(C.records.gust[1]))})</small>` : '–'}</dd></div>
       </dl></div>
+    <div class="block" id="diary"></div>
     <p class="foot">${C.station}. ${tx('Teplota od', 'Teplota od')} ${C.since.t}, ${tx('zrážky od', 'srážky od')} ${C.since.p}. ${tx('Normál', 'Normál')} ${C.normal}.
       ${anyEst ? tx('Svetlejšie stĺpce: ČHMÚ dáta za tieto mesiace ešte nezverejnilo, hodnoty sú odhad z reanalýzy ERA5 (do rekordov sa nepočítajú).', 'Světlejší sloupce: ČHMÚ data za tyto měsíce ještě nezveřejnil, hodnoty jsou odhad z reanalýzy ERA5 (do rekordů se nepočítají).') : ''}</p>`;
   drawClimateCharts();
+  renderDiary();
 };
+
+const DIARY_KIND = { rec_hi: ['crit', tx('rekord', 'rekord')], rec_lo: ['cold', tx('rekord', 'rekord')], rec_p: ['rain', tx('rekord', 'rekord')],
+  year_hi: ['warn', tx('rok', 'rok')], year_lo: ['cold', tx('rok', 'rok')], first_frost: ['cold', tx('mráz', 'mráz')], first_ice: ['cold', tx('ľad', 'led')],
+  first_snow: ['cold', tx('sneh', 'sníh')], first_trop: ['crit', tx('tropický', 'tropický')], first_summer: ['warn', tx('leto', 'léto')],
+  heavy_rain: ['rain', tx('dážď', 'déšť')], wind: ['warn', tx('vietor', 'vítr')] };
+async function renderDiary(all = false) {
+  const el = $('#diary'); if (!el) return;
+  if (!state.diary) {
+    try { state.diary = await fetchJSON(`data/diary.json?v=${Math.floor(Date.now() / 3600000)}`, 15000); } catch { el.hidden = true; return; }
+  }
+  const E = [...state.diary.events].reverse();
+  const list = all ? E : E.slice(0, 12);
+  el.innerHTML = `<h3>${tx('Denník počasia', 'Deník počasí')}</h3>
+    ${E.length ? `<ul class="diary">${list.map((e) => { const k = DIARY_KIND[e.type] || ['', '']; return `<li data-k="${k[0]}"><span class="dd">${fmtDateLong.format(new Date(e.date + 'T12:00:00'))}</span><span class="tg">${k[1]}</span><span>${LANG === 'cs' && e.text_cs ? e.text_cs : e.text}</span></li>`; }).join('')}</ul>
+      ${E.length > 12 && !all ? `<button class="btn" type="button" id="diary-all">${tx('Zobraziť všetko', 'Zobrazit vše')} (${E.length})</button>` : ''}`
+      : `<p class="skill-lead">${tx('Zatiaľ žiadne výnimočné udalosti. Denník sa plní automaticky – rekordy, prvý mráz, prvý sneh, výdatný dážď, silný vietor.', 'Zatím žádné výjimečné události. Deník se plní automaticky – rekordy, první mráz, první sníh, vydatný déšť, silný vítr.')}</p>`}`;
+  const b = $('#diary-all'); if (b) b.addEventListener('click', () => renderDiary(true));
+}
 
 function drawClimateCharts() {
   const C = state.climate; if (!C) return;

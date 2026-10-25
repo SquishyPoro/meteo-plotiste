@@ -226,6 +226,77 @@ def build(data, today, est=frozenset()):
             'months': months, 'year': {'y': today.year, 'cur': cur, 'normal': ncount}, 'last60': last}
 
 
+DIARY = os.path.join(ROOT, 'data', 'diary.json')
+
+
+def diary(data, today, est):
+    """Denník počasia: zaujímavé udalosti z meraní ČHMÚ za posledných 40 dní (bez odhadov ERA5)."""
+    T, TMA, TMI, SRA, SCE, FMAX = (data[k] for k in ('T', 'TMA', 'TMI', 'SRA', 'SCE', 'Fmax'))
+    ev = []
+    fc = lambda x: f'{x:.1f}'.replace('.', ',')
+    CS = [('Rekord tepla pre', 'Rekord tepla pro'), ('Rekord chladu pre', 'Rekord chladu pro'), ('Rekordné zrážky pre', 'Rekordní srážky pro'),
+          ('doterajší', 'dosavadní'), ('z roku', 'z roku'), ('Najteplejší deň roka', 'Nejteplejší den roku'), ('Najchladnejšia noc roka', 'Nejchladnější noc roku'),
+          ('zatiaľ', 'zatím'), ('Prvý mráz sezóny', 'První mráz sezóny'), ('Prvý ľadový deň sezóny (celý deň pod nulou', 'První ledový den sezóny (celý den pod nulou'),
+          ('Prvá snehová pokrývka sezóny', 'První sněhová pokrývka sezóny'), ('Prvý tropický deň roka', 'První tropický den roku'),
+          ('Prvý letný deň roka', 'První letní den roku'), ('Výdatný dážď', 'Vydatný déšť'), ('za deň', 'za den'), ('Silný vietor: náraz', 'Silný vítr: náraz')]
+    def add(d, kind, icon, text):
+        cs = text
+        for a, b in CS:
+            cs = cs.replace(a, b)
+        ev.append({'date': d.isoformat(), 'type': kind, 'text': text, 'text_cs': cs})
+    def season_start(d):  # chladná sezóna od 1. júla
+        return dt.date(d.year if d.month >= 7 else d.year - 1, 7, 1)
+    days = [today - dt.timedelta(days=k) for k in range(40, 0, -1)]
+    for d in days:
+        if d in est or d not in TMA:
+            continue
+        mx, mn, p = TMA.get(d), TMI.get(d), SRA.get(d)
+        md = d.strftime('%m-%d')
+        hist = lambda src: [x for dd, x in src.items() if dd.strftime('%m-%d') == md and dd.year < d.year and dd not in est]
+        hmx, hmn, hp = hist(TMA), hist(TMI), hist(SRA)
+        if mx is not None and hmx and mx > max(hmx):
+            y = max((x, dd.year) for dd, x in TMA.items() if dd.strftime('%m-%d') == md and dd.year < d.year)[1]
+            add(d, 'rec_hi', '🔥', f'Rekord tepla pre {d.day}. {d.month}.: {fc(mx)} °C (doterajší {fc(max(hmx))} °C z roku {y})')
+        if mn is not None and hmn and mn < min(hmn):
+            add(d, 'rec_lo', '🥶', f'Rekord chladu pre {d.day}. {d.month}.: {fc(mn)} °C (doterajší {fc(min(hmn))} °C)')
+        if p is not None and hp and p > max(hp) and p >= 10:
+            add(d, 'rec_p', '🌧️', f'Rekordné zrážky pre {d.day}. {d.month}.: {fc(p)} mm')
+        ytd = lambda src: [x for dd, x in src.items() if dd.year == d.year and dd < d and dd not in est]
+        if mx is not None and d.month >= 3 and ytd(TMA) and mx > max(ytd(TMA)):
+            add(d, 'year_hi', '☀️', f'Najteplejší deň roka {d.year} zatiaľ: {fc(mx)} °C')
+        if mn is not None and d.month in (11, 12, 1, 2) and ytd(TMI) and mn < min(ytd(TMI)) and mn < -5:
+            add(d, 'year_lo', '❄️', f'Najchladnejšia noc roka {d.year} zatiaľ: {fc(mn)} °C')
+        ss = season_start(d)
+        prev = lambda src, f: [x for dd, x in src.items() if ss <= dd < d and f(x)]
+        if mn is not None and mn < 0 and not prev(TMI, lambda x: x < 0):
+            add(d, 'first_frost', '🧊', f'Prvý mráz sezóny: {fc(mn)} °C')
+        if mx is not None and mx < 0 and not prev(TMA, lambda x: x < 0):
+            add(d, 'first_ice', '🧊', f'Prvý ľadový deň sezóny (celý deň pod nulou, max {fc(mx)} °C)')
+        sc = SCE.get(d)
+        if sc and sc >= 1 and not prev(SCE, lambda x: x >= 1):
+            add(d, 'first_snow', '⛄', f'Prvá snehová pokrývka sezóny: {sc:.0f} cm')
+        if mx is not None and mx >= 30 and not [x for dd, x in TMA.items() if dd.year == d.year and dd < d and x >= 30]:
+            add(d, 'first_trop', '🌡️', f'Prvý tropický deň roka: {fc(mx)} °C')
+        if mx is not None and mx >= 25 and not [x for dd, x in TMA.items() if dd.year == d.year and dd < d and x >= 25]:
+            add(d, 'first_summer', '🌤️', f'Prvý letný deň roka: {fc(mx)} °C')
+        if p is not None and p >= 20:
+            add(d, 'heavy_rain', '🌧️', f'Výdatný dážď: {fc(p)} mm za deň')
+        g = FMAX.get(d)
+        if g is not None and g >= 20:
+            add(d, 'wind', '💨', f'Silný vietor: náraz {g * 3.6:.0f} km/h')
+    # zlúčiť s existujúcim denníkom (záznamy sa nemažú)
+    old = []
+    if os.path.exists(DIARY):
+        with open(DIARY) as f:
+            old = json.load(f).get('events', [])
+    seen = {(e['date'], e['type']) for e in old}
+    merged = old + [e for e in ev if (e['date'], e['type']) not in seen]
+    merged.sort(key=lambda e: e['date'])
+    with open(DIARY, 'w') as f:
+        json.dump({'updated': int(time.time()), 'events': merged}, f, ensure_ascii=False, indent=0)
+    log(f'denník: {len(merged)} udalostí ({len(merged) - len(old)} nových)')
+
+
 def main():
     if os.path.exists(OUT) and '--force' not in sys.argv:
         with open(OUT) as f:
@@ -242,6 +313,10 @@ def main():
         log('ERA5 zlyhal:', e)
         est = set()
     res = build(data, today, est)
+    try:
+        diary(data, today, est)
+    except Exception as e:
+        log('denník zlyhal:', e)
     with open(OUT, 'w') as f:
         json.dump(res, f, ensure_ascii=False, separators=(',', ':'))
     log('climate.json:', json.dumps(res['records'], ensure_ascii=False), json.dumps(res['year'], ensure_ascii=False))
