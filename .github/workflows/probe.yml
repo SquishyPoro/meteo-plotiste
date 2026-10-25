@@ -18,21 +18,6 @@ jobs:
           for f in $M; do echo "== $f"; curl -sS -m 60 "$Y/now/metadata/$f" | head -c 1500; echo; curl -sS -m 60 "$Y/now/metadata/$f" | grep -i -o '.\{200\}\(Hradec\|Předměřice\|Orlice\|Němčice\|Týniště\|Jaroměř\|Labe\).\{200\}' | head -20; done > hydro-meta.txt 2>&1
           D=$(curl -sS -m 60 $Y/now/data/ | grep -o 'href="[^"]*"' | cut -d'"' -f2 | grep -v '/$\|\.\.' | head -3)
           for f in $D; do echo "== $f"; curl -sS -m 60 "$Y/now/data/$f" | head -c 2500; echo; done > hydro-data.txt 2>&1
-          curl -sS -m 30 -D h1.txt -H "$O" https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json -o kp.json; head -c 1500 kp.json > swpc.txt; grep -i "access-control\|HTTP/" h1.txt >> swpc.txt
-          curl -sS -m 30 -D h2.txt -H "$O" https://services.swpc.noaa.gov/json/ovation_aurora_latest.json -o ov.json; head -c 600 ov.json >> swpc.txt; grep -i "access-control\|HTTP/" h2.txt >> swpc.txt
-          curl -sS -m 30 -D h3.txt -H "$O" https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json -o kpo.json; tail -c 400 kpo.json >> swpc.txt; grep -i "access-control" h3.txt >> swpc.txt
-          W="https://view.eumetsat.int/geoserver/wms"
-          curl -sS -m 90 "$W?service=WMS&version=1.3.0&request=GetCapabilities" -o caps.xml
-          python3 - <<'PY'
-          import re
-          c = open('caps.xml').read()
-          out = open('sat.txt','w')
-          for m in re.finditer(r'<Layer queryable="1"[^>]*>\s*<Name>(mtg_fd:[^<]+|msg_fes:[^<]+)</Name>\s*<Title>([^<]*)</Title>', c):
-            seg = c[m.end(): m.end()+3000]
-            dim = re.search(r'<Dimension name="time"[^>]*>([^<]{0,120})', seg)
-            out.write(f'{m.group(1)} | {m.group(2)} | {dim.group(1)[-60:] if dim else ""}\n')
-          PY
-          rm caps.xml kp.json ov.json kpo.json h*.txt
           cd .. && git init -q probe && cp out/* probe/ && cd probe
           git config user.name probe && git config user.email probe@users.noreply.github.com
           git add -A && git commit -qm probe
