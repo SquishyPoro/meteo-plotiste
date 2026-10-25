@@ -149,7 +149,7 @@ async function loadLocalLive() {
       ...base,
       current: 'temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,precipitation',
       hourly: 'pressure_msl',
-      daily: 'sunrise,sunset,weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_gusts_10m_max',
+      daily: 'sunrise,sunset,weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_gusts_10m_max,uv_index_max,daylight_duration',
     })),
     fetchJSON('https://api.open-meteo.com/v1/forecast?' + qs({
       ...base,
@@ -2336,6 +2336,70 @@ function renderRivers() {
       ${tx('Aktualizované', 'Aktualizováno')} ${fmtTime.format(R.updated * 1000)}.</div>`;
 }
 
+/* ------------------------------------------------------------------ SLNKO, MESIAC, UV */
+// východ/západ pre ľubovoľný uhol slnka (−0,833° = východ, −6° = občiansky súmrak), rovnica východu slnka
+function sunEvents(date, h0) {
+  const rad = Math.PI / 180, lat = HK.lat * rad;
+  const J = Math.round(date.getTime() / 86400000 + 2440587.5) - 2451545 + 0.0008;
+  const Js = J - HK.lon / 360, M = (357.5291 + 0.98560028 * Js) % 360;
+  const C = 1.9148 * Math.sin(M * rad) + 0.02 * Math.sin(2 * M * rad) + 0.0003 * Math.sin(3 * M * rad);
+  const lam = (M + C + 180 + 102.9372) % 360;
+  const Jt = 2451545 + Js + 0.0053 * Math.sin(M * rad) - 0.0069 * Math.sin(2 * lam * rad);
+  const dec = Math.asin(Math.sin(lam * rad) * Math.sin(23.4397 * rad));
+  const cw = (Math.sin(h0 * rad) - Math.sin(lat) * Math.sin(dec)) / (Math.cos(lat) * Math.cos(dec));
+  if (cw < -1 || cw > 1) return null;
+  const w = Math.acos(cw) / rad;
+  const toUnix = (jd) => (jd - 2440587.5) * 86400;
+  return { rise: toUnix(Jt - w / 360), set: toUnix(Jt + w / 360), noon: toUnix(Jt) };
+}
+function moonInfo(t) {
+  const syn = 29.530588853, ref = Date.UTC(2000, 0, 6, 18, 14) / 1000;
+  const age = (((t - ref) / 86400) % syn + syn) % syn, f = age / syn;
+  const illum = (1 - Math.cos(2 * Math.PI * f)) / 2;
+  const names = tx(['nov', 'dorastajúci kosák', 'prvá štvrť', 'dorastajúci mesiac', 'spln', 'ubúdajúci mesiac', 'posledná štvrť', 'ubúdajúci kosák'],
+    ['novoluní', 'dorůstající srpek', 'první čtvrť', 'dorůstající měsíc', 'úplněk', 'ubývající měsíc', 'poslední čtvrť', 'ubývající srpek']);
+  const name = names[Math.round(f * 8) % 8];
+  const toFull = ((0.5 - f + 1) % 1) * syn, toNew = ((1 - f) % 1) * syn;
+  return { f, illum, name, full: t + toFull * 86400, nw: t + toNew * 86400 };
+}
+function moonSvg(f) { // tieň mesiaca podľa fázy
+  const r = 11, k = Math.cos(2 * Math.PI * f), wax = f < 0.5;
+  const sweep = wax ? 1 : 0, rx = Math.abs(k) * r;
+  const lit = `M12 1 A${r} ${r} 0 0 ${sweep} 12 23 A${rx} ${r} 0 0 ${(k > 0) === wax ? 0 : 1} 12 1Z`;
+  return `<svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><circle cx="12" cy="12" r="${r}" fill="#1b2638"/><path d="${lit}" fill="#e8ecf5"/></svg>`;
+}
+const UV_LV = [[3, 'ok', tx('nízky', 'nízký'), ''], [6, 'warn', tx('stredný', 'střední'), tx('cez obed klobúk a okuliare', 'přes poledne klobouk a brýle')],
+  [8, 'serious', tx('vysoký', 'vysoký'), tx('opaľovací krém, obed v tieni', 'opalovací krém, poledne ve stínu')], [11, 'crit', tx('veľmi vysoký', 'velmi vysoký'), tx('vyhni sa slnku 11–15 h', 'vyhni se slunci 11–15 h')],
+  [99, 'crit', tx('extrémny', 'extrémní'), tx('zostaň v tieni', 'zůstaň ve stínu')]];
+
+function renderSky() {
+  const el = $('#sky');
+  const L = state.local; if (!L) { el.hidden = true; return; }
+  const now = new Date(), t = now.getTime() / 1000;
+  const sr = L.sun && L.sun[0], sr1 = L.sun && L.sun[1];
+  const ev = sunEvents(now, -0.833), civ = sunEvents(now, -6);
+  const rise = sr ? sr[0] : ev && ev.rise, set = sr ? sr[1] : ev && ev.set;
+  const len = set - rise, len1 = sr1 ? sr1[1] - sr1[0] : null;
+  const dlen = len1 != null ? Math.round((len1 - len) / 60) : null;
+  const hm = (sec) => `${Math.floor(sec / 3600)} h ${String(Math.round((sec % 3600) / 60)).padStart(2, '0')} min`;
+  const M = moonInfo(t);
+  const uv = L.daily && L.daily.uv_index_max ? L.daily.uv_index_max[0] : null;
+  const uvl = uv == null ? null : UV_LV.find(([mx]) => uv < mx);
+  const uvTom = L.daily && L.daily.uv_index_max ? L.daily.uv_index_max[1] : null;
+  el.hidden = false;
+  el.dataset.n = uv != null ? 3 : 2;
+  el.innerHTML = `<div class="sky-sun">
+      <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><circle cx="12" cy="12" r="5" fill="#ffc94d"/><g stroke="#ffc94d" stroke-width="1.6" stroke-linecap="round"><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></g></svg>
+      <div><b>${fmtTime.format(rise * 1000)} – ${fmtTime.format(set * 1000)}</b>
+        <span>${tx('dĺžka dňa', 'délka dne')} ${hm(len)}${dlen ? ` · ${tx('zajtra', 'zítra')} ${dlen > 0 ? '+' : '−'}${Math.abs(dlen)} min` : ''}</span>
+        ${civ ? `<span>${tx('svetlo od', 'světlo od')} ${fmtTime.format(civ.rise * 1000)} ${tx('do', 'do')} ${fmtTime.format(civ.set * 1000)}</span>` : ''}</div></div>
+    <div class="sky-moon">${moonSvg(M.f)}
+      <div><b>${cap(M.name)}</b><span>${tx('osvetlené', 'osvětleno')} ${Math.round(M.illum * 100)} %</span>
+        <span>${tx('spln', 'úplněk')} ${dayShort(M.full)}${Math.abs(M.full - t) > 86400 * 20 ? '' : ''} · ${tx('nov', 'nov')} ${dayShort(M.nw)}</span></div></div>
+    ${uv != null ? `<div class="sky-uv"><span class="chip" data-level="${uvl[1]}">UV ${r0(uv)}</span>
+      <div><b>${uvl[2]}</b><span>${uvl[3] || tx('ochrana nie je potrebná', 'ochrana není potřeba')}${uvTom != null ? ` · ${tx('zajtra', 'zítra')} ${r0(uvTom)}` : ''}</span></div></div>` : ''}`;
+}
+
 /* ------------------------------------------------------------------ VÝSTRAHY ČHMÚ (data/warnings.json z GitHub Actions) */
 const WARN_LEVEL = { yellow: tx('Žltá výstraha', 'Žlutá výstraha'), orange: tx('Oranžová výstraha', 'Oranžová výstraha'), red: tx('Červená výstraha', 'Červená výstraha') };
 const fmtWarnTime = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -2376,8 +2440,8 @@ function setStatus() {
 async function load(force = false) {
   const st = $('#status'); st.dataset.state = 'loading'; st.querySelector('span').textContent = tx('Načítavam', 'Načítám');
   state.staleAt = null;
-  const getLocal = () => liveOrStale('mp-local-v2', 30, force, async () => {
-    const d = await loadLocalLive(); cacheSet('mp-local-v2', d); return d;
+  const getLocal = () => liveOrStale('mp-local-v3', 30, force, async () => {
+    const d = await loadLocalLive(); cacheSet('mp-local-v3', d); return d;
   });
   const reviveGrid = (c) => ({ ...c, P: c.P.map((a) => Float32Array.from(Object.values(a))), G: c.G.map((a) => Float32Array.from(Object.values(a))), R: c.R.map((a) => Float32Array.from(Object.values(a))), C: c.C.map((a) => Float32Array.from(Object.values(a))) });
   const getGrid = () => liveOrStale('mp-grid-v1', 60, force, async () => {
@@ -2410,7 +2474,7 @@ async function load(force = false) {
   state.step = Math.min(state.step, state.grid.times.length - 1);
 
   state.winter = wi.status === 'fulfilled' ? wi.value : null;
-  renderWeek(); renderNow(); renderPrecip(); renderWinter(); renderSummary(); renderOutlook(); renderRisk(); renderSkill();
+  renderWeek(); renderNow(); renderSky(); renderPrecip(); renderWinter(); renderSummary(); renderOutlook(); renderRisk(); renderSkill();
   if (!charts.length) setupCharts();
   drawCharts();
   renderLegend(); renderTimeline(); renderSystems();

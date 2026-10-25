@@ -231,7 +231,7 @@ def forecast():
     ens = get(f'https://ensemble-api.open-meteo.com/v1/ensemble?{q}&hourly=temperature_2m,precipitation,wind_gusts_10m,cape'
               '&models=ecmwf_ifs025,icon_seamless,gfs025', timeout=60)
     det = get(f'https://api.open-meteo.com/v1/forecast?{q}&hourly=temperature_2m,precipitation,wind_gusts_10m,precipitation_probability'
-              '&daily=temperature_2m_min,temperature_2m_max,precipitation_sum,wind_gusts_10m_max,weather_code')
+              '&daily=temperature_2m_min,temperature_2m_max,precipitation_sum,wind_gusts_10m_max,weather_code,uv_index_max')
     m15 = get(f'https://api.open-meteo.com/v1/forecast?latitude={HK[0]}&longitude={HK[1]}&models=icon_d2&timeformat=unixtime'
               '&minutely_15=precipitation&forecast_minutely_15=8')
     h = ens['hourly']
@@ -569,6 +569,9 @@ def main():
                        + (f'zrážky {pmax} % ({fmt(rain, 1)} mm)' if rain >= 0.2 else 'bez výraznejších zrážok')
                        + f', nárazy vetra do {fmt(dd["wind_gusts_10m_max"][i])} km/h.')
                 risks = [n for n, p in (('silný vietor', w.get('p_wind', 0)), ('výdatný dážď', w.get('p_heavy', 0)), ('búrky', w.get('p_storm', 0))) if p >= 0.3]
+                uv = (dd.get('uv_index_max') or [None])[i]
+                if uv is not None and uv >= 6:
+                    msg += f' UV index až {fmt(uv)} – opaľovací krém.'
                 if risks:
                     msg += ' Pozor: ' + ', '.join(risks) + '.'
                 send(topic, 'Dobré ráno, dnes v Plotišti', msg, 'sunrise', 2, dry)
