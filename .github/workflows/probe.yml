@@ -10,12 +10,12 @@ jobs:
         run: |
           set +e
           mkdir out && cd out
-          for u in https://opendata.chmi.cz/ https://opendata.chmi.cz/meteorology/ https://opendata.chmi.cz/meteorology/climate/ https://opendata.chmi.cz/meteorology/climate/now/ https://opendata.chmi.cz/meteorology/climate/now/data/ https://opendata.chmi.cz/meteorology/climate/now/metadata/; do
-            echo "=== $u"; curl -sS -m 60 "$u" | sed 's/<[^>]*>/ /g' | tr -s ' \n' | head -c 4000; echo
-          done > chmi.txt 2>&1
-          curl -sS -m 60 https://opendata.chmi.cz/meteorology/climate/now/data/ | grep -o 'href="[^"]*"' > chmi-now-data-hrefs.txt 2>&1
-          curl -sS -m 30 "https://aviationweather.gov/api/data/metar?ids=LKPD,LKHK&format=json&hours=2" > metar.json 2>&1
-          curl -sS -m 30 "https://previous-runs-api.open-meteo.com/v1/forecast?latitude=50.236&longitude=15.79&hourly=temperature_2m,temperature_2m_previous_day1&models=ecmwf_ifs025&past_days=2&forecast_days=1" > prevruns.json 2>&1
+          B=https://opendata.chmi.cz/meteorology/climate/now
+          curl -sS -m 60 $B/metadata/ | grep -o 'href="[^"]*"' > meta-hrefs.txt
+          curl -sS -m 60 $B/data/ | grep -o 'href="[^"]*"' | grep -E '116(4|5|6)' > data-hk-hrefs.txt
+          for f in $(grep -o '"[^"]*json"' meta-hrefs.txt | tr -d '"' | head -5); do echo "=== $f"; curl -sS -m 60 "$B/metadata/$f" | head -c 3000; echo; done > meta-samples.txt
+          for f in $(grep -o '"[^"]*json"' meta-hrefs.txt | tr -d '"'); do curl -sS -m 60 "$B/metadata/$f" | grep -o '.\{300\}Hradec.\{300\}' | head -5; done > meta-hradec.txt
+          F=$(grep -o '"[^"]*json"' data-hk-hrefs.txt | tr -d '"' | tail -1); echo "$F" > data-sample.txt; curl -sS -m 60 "$B/data/$F" | head -c 4000 >> data-sample.txt
           cd .. && git init -q probe && cp out/* probe/ && cd probe
           git config user.name probe && git config user.email probe@users.noreply.github.com
           git add -A && git commit -qm probe
