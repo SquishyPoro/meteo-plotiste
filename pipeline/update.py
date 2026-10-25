@@ -74,9 +74,11 @@ def fetch_day_10min(wsi, day):
         return None
     out = {}
     for _st, el, ts, val, _flag, _q in j['data']['data']['values']:
-        if val is None:
+        try:
+            v = float(val)
+        except (TypeError, ValueError):  # prázdne alebo chýbajúce meranie
             continue
-        out.setdefault(el, {})[dt.datetime.fromisoformat(ts.replace('Z', '+00:00'))] = float(val)
+        out.setdefault(el, {})[dt.datetime.fromisoformat(ts.replace('Z', '+00:00'))] = v
     return out
 
 
