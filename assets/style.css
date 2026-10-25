@@ -285,6 +285,19 @@ table.pm td[data-c="2"], table.pm td[data-c="3"] { color: #0b1424; font-weight: 
 table.pm tr.prob td { background: rgba(143, 156, 255, var(--a, 0)); color: var(--fg); }
 table.pm tr.prob td.na { background: #0f1a2b; color: var(--dim); }
 
+/* radar */
+.precip-radar, .precip-head { margin: 0; max-width: 65ch; }
+.precip-radar { padding-left: 9px; border-left: 3px solid var(--ok); }
+.precip-radar[data-level="warn"] { border-left-color: var(--warn); }
+.lbl { display: inline-block; margin-right: 4px; font: 600 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.radar-sum { border-left: 3px solid var(--ok); padding: 2px 0 2px 10px; max-width: 75ch; }
+.radar-sum[data-level="warn"] { border-left-color: var(--warn); }
+.radar-sum .t { font: 600 12px var(--mono); color: var(--fg); }
+.radar-sum .t em { font-style: normal; color: var(--warn); }
+.radar-sum p { margin: 4px 0 0; }
+.radar-note { margin-top: 5px; font: 10.5px var(--mono); color: var(--dim); }
+.map-legend .keys.rk span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
+
 /* presnosť modelov */
 .skill-lead { font-size: 12.5px; margin: 0 0 8px; max-width: 65ch; }
 .skill-lead b { font-family: var(--mono); font-weight: 500; }
@@ -317,7 +330,7 @@ table.skill .w i { display: inline-block; height: 6px; border-radius: 1px; backg
   .map-wrap { flex: none; }
   .windows:not([data-max]) .map-wrap { min-height: 0; height: 62vh; max-height: 560px; }
   .win-head .sub { display: none; }
-  .map-legend .keys { display: none; }
+  .map-legend .keys:not(.rk) { display: none; }
   .map-readout { right: 10px; font-size: 10.5px; }
   .windows[data-max="europe"] .map-wrap { height: 78vh; }
   .windows[data-max="local"] .local-body { grid-template-columns: minmax(0, 1fr); }

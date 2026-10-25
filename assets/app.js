@@ -22,7 +22,7 @@ const STEP_H = 3, MAX_STEPS = 41; // 0 … 120 h
 const DAYS = 7;
 
 const $ = (s) => document.querySelector(s);
-const state = { local: null, grid: null, tracks: [], layer: 'wind', step: 0, demo: { local: false, grid: false }, skill: null, obs: null, precip: null, precipRange: 12 };
+const state = { local: null, grid: null, tracks: [], layer: 'wind', step: 0, demo: { local: false, grid: false }, skill: null, obs: null, precip: null, precipRange: 12, radar: null, rstep: 0, radarError: false };
 try { const r = +localStorage.getItem('mp-precip-range'); if ([3, 12, 48].includes(r)) state.precipRange = r; } catch { /* nevadí */ }
 const OBS_COLOR = '#f2c46d';
 const AI_COLOR = '#8fd3ff';
@@ -603,8 +603,15 @@ function smoothPath(ctx, pts) {
 
 function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
+function positionPulse(proj) {
+  const hp = proj([HK.lon, HK.lat]), pulse = $('#hk-pulse');
+  pulse.style.left = hp[0] + 'px'; pulse.style.top = hp[1] + 'px';
+}
+
 function drawMap() {
   if (!map.proj) return;
+  if (state.layer === 'radar') { drawRadarMap(); positionPulse(map.rproj); return; }
+  positionPulse(map.proj);
   const ctx = map.canvas.getContext('2d');
   ctx.setTransform(map.dpr, 0, 0, map.dpr, 0, 0);
   ctx.clearRect(0, 0, map.w, map.h);
@@ -683,8 +690,13 @@ function drawMap() {
 }
 
 function renderLegend() {
-  const L = LAYERS[state.layer];
   const el = $('#map-legend');
+  if (state.layer === 'radar') {
+    el.innerHTML = `<div class="lt">Radar · intenzita [mm/h]</div><div class="keys rk">${RAIN_CLASSES.map((c) => `<span style="--c:${c.color}">${c.name} ≥ ${String(c.min).replace('.', ',')}</span>`).join('')}
+      <span style="--c:${R_STORM}">búrka, krúpy ≥ 50 dBZ</span></div><div class="keys"><span>šípka = pohyb zrážok za 60 min</span></div>`;
+    return;
+  }
+  const L = LAYERS[state.layer];
   const keys = `<div class="keys"><span><b>N</b> tlaková níž · <b>V</b> tlaková výš (hPa)</span>
     <span>— — dráha níže, bodka = 24 h</span><span>čiary = izobary po 4 hPa</span></div>`;
   if (!L.key) { el.innerHTML = `<div class="lt">${L.name}</div>${keys}`; return; }
@@ -695,6 +707,16 @@ function renderLegend() {
 }
 
 function renderTimeline() {
+  if (state.layer === 'radar') {
+    const seq = radarSeq(), inp = $('#time');
+    if (!seq.length) { $('#tl-label').textContent = 'Radar…'; return; }
+    state.rstep = clamp(state.rstep, 0, seq.length - 1);
+    inp.max = seq.length - 1; inp.value = state.rstep;
+    const fr = seq[state.rstep], last = state.radar.frames[state.radar.frames.length - 1];
+    const m = Math.round((fr.time - last.time) / 60);
+    $('#tl-label').innerHTML = `${fmtTime.format(fr.time * 1000)} <span>${m > 0 ? '+' + m + ' min · odhad' : m < 0 ? m + ' min' : 'posledná snímka'}</span>`;
+    return;
+  }
   const G = state.grid; if (!G) return;
   const inp = $('#time'); inp.max = G.times.length - 1; inp.value = state.step;
   const t = G.times[state.step];
@@ -703,6 +725,7 @@ function renderTimeline() {
 }
 
 function mapReadout(ev) {
+  if (state.layer === 'radar') { radarReadout(ev); return; }
   if (!map.proj || !state.grid) return;
   const r = map.canvas.getBoundingClientRect();
   const ll = map.proj.invert([ev.clientX - r.left, ev.clientY - r.top]);
@@ -719,6 +742,8 @@ function mapReadout(ev) {
 }
 
 function renderSystems() {
+  if (state.layer === 'radar') { renderRadarPanel(); return; }
+  $('.systems h3').textContent = 'Sledované tlakové níže a ich dosah na Plotiště';
   const el = $('#sys-list');
   const D = state.derived;
   if (!state.tracks.length) { el.innerHTML = '<span class="empty">Žiadna výrazná tlaková níž (pod 1004 hPa) v najbližších 5 dňoch.</span>'; return; }
@@ -1136,7 +1161,8 @@ function renderPrecip() {
         <button type="button" data-h="3" aria-pressed="${state.precipRange === 3}">3 h</button>
         <button type="button" data-h="12" aria-pressed="${state.precipRange === 12}">12 h</button>
         <button type="button" data-h="48" aria-pressed="${state.precipRange === 48}">48 h</button></div></div>
-    <p class="precip-head">${precipHeadline(P)}</p>
+    ${state.radar ? `<p class="precip-radar" data-level="${state.radar.summary.level}"><span class="lbl">Radar ${state.radar.summary.time}</span> ${state.radar.summary.html}</p>` : ''}
+    <p class="precip-head"><span class="lbl">Model ICON-D2</span> ${precipHeadline(P)}</p>
     <div class="chart" id="ch-m15"><svg></svg><div class="tip" hidden></div></div>
     <div class="precip-key">${RAIN_CLASSES.map((c) => `<span style="--c:${c.color}">${c.name}${c.min === 10 ? ' ≥ 10' : ''}</span>`).join('')}<span class="u">mm/h · po 15 min · ICON-D2 2 km</span></div>
     <h3 class="sub-h">Po hodinách · modely s vysokým rozlíšením [mm]</h3>
@@ -1231,6 +1257,357 @@ function drawPrecipChart() {
     .on('pointerleave', () => { cross.attr('opacity', 0); tip.hidden = true; });
 }
 
+/* ------------------------------------------------------------------ RADAR (RainViewer) + vlastný nowcast
+ * Dlaždice z7 (3×3 okolo Plotišťa, ~600 km), farby „Universal Blue“ sa prevedú späť na dBZ.
+ * Odhad pohybu: porovnanie posledných snímok po blokoch (block matching), potom posun poslednej snímky
+ * po vektoroch pohybu až 90 min dopredu (semi-Lagrangeovská extrapolácia).
+ */
+const RZ = 7, RX0 = 68, RY0 = 42, RT = 3, RW = 256 * RT;
+const R_FRAMES = 7, R_FC = 9;              // 60 min histórie, 90 min odhadu (krok 10 min)
+const KM_PX = 156.543 * Math.cos(HK.lat * Math.PI / 180) / 2 ** RZ; // km na pixel
+const R_WET = 15;                           // dBZ ≈ 0,3 mm/h
+// RainViewer „Universal Blue“, dBZ −10 … 95
+const UB = '63615914,66635a19,69665c1e,6c685d24,6f6b5f29,726e612e,75706234,78736439,7c75653e,7f786744,827b6949,857d6a4e,88806c54,8b826d59,8e856f5e,92887164,9e93756e,aa9e7978,b6a97e82,c2b4828c,cec08796,d2c48ba0,d6c88faa,dacc93b4,ded097be,88ddeeff,6cd1ebff,51c5e8ff,36bae5ff,1baee2ff,00a3e0ff,009ad5ff,0091caff,0088bfff,007fb4ff,0077aaff,0070a3ff,00699cff,006295ff,005b8eff,005588ff,005180ff,004e78ff,004a70ff,004768ff,ffee00ff,ffe000ff,ffd200ff,ffc500ff,ffb700ff,ffaa00ff,ff9f00ff,ff9500ff,ff8b00ff,ff8100ff,ff4400ff,f23600ff,e62800ff,d91b00ff,cd0d00ff,c10000ff,a80000ff,8f0000ff,760000ff,5d0000ff,ffaaffff,ff9fffff,ff95ffff,ff8bffff,ff81ffff,ff77ffff,ff6cffff,ff62ffff,ff58ffff,ff4effff,ffffffff,ffffffff,ffffffff,ffffffff,ffffffff,ffffffff,ffffffff,ffffffff,ffffffff,ffffffff,00ff00ff,00ff00ff,00ff00ff,00ff00ff,00ff00ff,00ff00ff,00ff00ff,00ff00ff,00ff00ff,00ff00ff,00ff00ff,00ff00ff,00ff00ff,00ff00ff,00ff00ff,00ff00ff,00ff00ff,00ff00ff,00ff00ff,00ff00ff,00ff00ff'.split(',');
+const UB_RGB = new Map(), UB_ALPHA = [];
+UB.forEach((h, i) => {
+  const n = parseInt(h, 16) >>> 0, a = n & 255, rgb = n >>> 8, dbz = i - 10;
+  if (a === 255) { if (!UB_RGB.has(rgb)) UB_RGB.set(rgb, dbz); } else UB_ALPHA.push([a, dbz]);
+});
+const NO_ECHO = -128;
+const rateOf = (dbz) => (dbz <= NO_ECHO ? 0 : (10 ** (dbz / 10) / 200) ** 0.625); // Marshall–Palmer
+function decodeColor(r, g, b, a) {
+  if (a === 0) return NO_ECHO;
+  if (a < 250) { // slabé echá sú kódované priesvitnosťou
+    let best = UB_ALPHA[0];
+    for (const x of UB_ALPHA) if (Math.abs(x[0] - a) < Math.abs(best[0] - a)) best = x;
+    return best[1];
+  }
+  const key = (r << 16) | (g << 8) | b;
+  const hit = UB_RGB.get(key);
+  if (hit != null) return hit;
+  let bd = Infinity, bz = NO_ECHO;
+  for (const [k, z] of UB_RGB) {
+    const d = (((k >> 16) & 255) - r) ** 2 + (((k >> 8) & 255) - g) ** 2 + ((k & 255) - b) ** 2;
+    if (d < bd) { bd = d; bz = z; }
+  }
+  UB_RGB.set(key, bz);
+  return bz;
+}
+
+// pixel (0…768) ↔ zemepisné súradnice (Web Mercator)
+const rPx = (lon, lat) => {
+  const n = 2 ** RZ * 256, s = Math.sin(lat * Math.PI / 180);
+  return [(lon + 180) / 360 * n - RX0 * 256, (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n - RY0 * 256];
+};
+const rLonLat = (x, y) => {
+  const n = 2 ** RZ * 256;
+  return [(x + RX0 * 256) / n * 360 - 180, Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + RY0 * 256) / n))) * 180 / Math.PI];
+};
+const HK_PX = rPx(HK.lon, HK.lat);
+
+const radarTileCache = new Map();
+function loadImg(url) {
+  return new Promise((res, rej) => {
+    const im = new Image(); im.crossOrigin = 'anonymous';
+    im.onload = () => res(im); im.onerror = () => rej(new Error('tile ' + url));
+    im.src = url;
+  });
+}
+async function loadRadarFrame(host, f) {
+  if (radarTileCache.has(f.path)) return radarTileCache.get(f.path);
+  const cv = document.createElement('canvas'); cv.width = cv.height = RW;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  await Promise.all([0, 1, 2].flatMap((dx) => [0, 1, 2].map(async (dy) => {
+    const im = await loadImg(`${host}${f.path}/256/${RZ}/${RX0 + dx}/${RY0 + dy}/2/0_0.png`);
+    ctx.drawImage(im, dx * 256, dy * 256);
+  })));
+  const d = ctx.getImageData(0, 0, RW, RW).data;
+  const z = new Int8Array(RW * RW);
+  for (let i = 0; i < z.length; i++) z[i] = decodeColor(d[i * 4], d[i * 4 + 1], d[i * 4 + 2], d[i * 4 + 3]);
+  const fr = { time: f.time, z };
+  radarTileCache.set(f.path, fr);
+  return fr;
+}
+
+async function loadRadar() {
+  const meta = await fetchJSON('https://api.rainviewer.com/public/weather-maps.json', 15000);
+  const past = meta.radar.past.slice(-R_FRAMES);
+  const frames = await Promise.all(past.map((f) => loadRadarFrame(meta.host, f)));
+  for (const k of radarTileCache.keys()) if (!past.some((f) => f.path === k)) radarTileCache.delete(k);
+  const motion = estimateMotion(frames);
+  const fc = motion ? extrapolate(frames[frames.length - 1], motion) : [];
+  const r = { frames, fc, motion };
+  r.summary = radarSummary(r);
+  return r;
+}
+
+/* ---- odhad pohybu: bloky 32×32 na 4× zmenšenej mriežke, hľadanie posunu ±8 px (= ±25 km / 10 min) */
+function downsample(z) {
+  const N = RW / 4, out = new Float32Array(N * N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    let s = 0;
+    for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) { const v = z[(y * 4 + j) * RW + x * 4 + i]; if (v >= 10) s += v; }
+    out[y * N + x] = s / 16;
+  }
+  return out;
+}
+const median = (a) => { if (!a.length) return null; const s = [...a].sort((p, q) => p - q); return s[Math.floor(s.length / 2)]; };
+
+function estimateMotion(frames) {
+  const N = RW / 4, B = 32, NB = N / B, S = 8;
+  const ds = frames.map((f) => downsample(f.z));
+  const per = Array.from({ length: NB * NB }, () => ({ x: [], y: [] }));
+  for (let k = Math.max(1, frames.length - 3); k < frames.length; k++) {
+    if (Math.abs(frames[k].time - frames[k - 1].time - 600) > 120) continue;
+    const a = ds[k - 1], b = ds[k];
+    for (let by = 0; by < NB; by++) for (let bx = 0; bx < NB; bx++) {
+      let echo = 0;
+      for (let y = by * B; y < by * B + B; y++) for (let x = bx * B; x < bx * B + B; x++) if (b[y * N + x] > 5) echo++;
+      if (echo < B * B * 0.08) continue;
+      let best = Infinity, bv = null;
+      for (let dy = -S; dy <= S; dy++) for (let dx = -S; dx <= S; dx++) {
+        let cost = 0, n = 0;
+        for (let y = by * B; y < by * B + B; y += 2) {
+          const py = y - dy; if (py < 0 || py >= N) continue;
+          for (let x = bx * B; x < bx * B + B; x += 2) {
+            const px = x - dx; if (px < 0 || px >= N) continue;
+            cost += Math.abs(b[y * N + x] - a[py * N + px]); n++;
+          }
+        }
+        if (n < 64) continue;
+        cost = cost / n + 0.02 * (dx * dx + dy * dy); // mierne preferovať menší posun
+        if (cost < best) { best = cost; bv = [dx, dy]; }
+      }
+      if (bv) { per[by * NB + bx].x.push(bv[0]); per[by * NB + bx].y.push(bv[1]); }
+    }
+  }
+  const all = per.filter((p) => p.x.length);
+  if (!all.length) return null;
+  const gx = median(all.map((p) => median(p.x))), gy = median(all.map((p) => median(p.y)));
+  let vx = per.map((p) => (p.x.length ? median(p.x) : gx)), vy = per.map((p) => (p.y.length ? median(p.y) : gy));
+  // vyhladenie 3×3 a prevod na plné rozlíšenie (px / 10 min)
+  const sm = (v) => v.map((_, i) => {
+    const bx = i % NB, by = Math.floor(i / NB); let s = 0, n = 0;
+    for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) {
+      const x = bx + k, y = by + j; if (x < 0 || y < 0 || x >= NB || y >= NB) continue;
+      s += v[y * NB + x]; n++;
+    }
+    return (s / n) * 4;
+  });
+  vx = sm(vx); vy = sm(vy);
+  return { NB, vx, vy, gx: gx * 4, gy: gy * 4, blocks: all.length };
+}
+
+function motionAt(M, x, y) {
+  const cs = RW / M.NB, fx = clamp(x / cs - 0.5, 0, M.NB - 1), fy = clamp(y / cs - 0.5, 0, M.NB - 1);
+  const x0 = Math.min(M.NB - 2, Math.floor(fx)), y0 = Math.min(M.NB - 2, Math.floor(fy)), tx = fx - x0, ty = fy - y0;
+  const g = (a) => a[y0 * M.NB + x0] * (1 - tx) * (1 - ty) + a[y0 * M.NB + x0 + 1] * tx * (1 - ty) + a[(y0 + 1) * M.NB + x0] * (1 - tx) * ty + a[(y0 + 1) * M.NB + x0 + 1] * tx * ty;
+  return [g(M.vx), g(M.vy)];
+}
+
+function extrapolate(last, M) {
+  const step = 2; // výpočet na polovičnom rozlíšení
+  const W = RW / step, Dx = new Float32Array(W * W), Dy = new Float32Array(W * W);
+  const out = [];
+  for (let k = 1; k <= R_FC; k++) {
+    const z = new Int8Array(RW * RW).fill(NO_ECHO);
+    for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) {
+      const q = j * W + i, x = i * step, y = j * step;
+      const [vx, vy] = motionAt(M, x - Dx[q], y - Dy[q]);
+      Dx[q] += vx; Dy[q] += vy;
+      const sx = Math.round(x - Dx[q]), sy = Math.round(y - Dy[q]);
+      if (sx < 0 || sy < 0 || sx >= RW || sy >= RW) continue;
+      const v = last.z[sy * RW + sx];
+      for (let b = 0; b < step; b++) for (let a = 0; a < step; a++) z[(y + b) * RW + x + a] = v;
+    }
+    out.push({ time: last.time + k * 600, z, fc: true });
+  }
+  return out;
+}
+
+function zAtHK(fr, r = 2) {
+  let m = NO_ECHO;
+  const [cx, cy] = HK_PX.map(Math.round);
+  for (let y = cy - r; y <= cy + r; y++) for (let x = cx - r; x <= cx + r; x++) m = Math.max(m, fr.z[y * RW + x]);
+  return m;
+}
+
+function radarSummary(R) {
+  const last = R.frames[R.frames.length - 1];
+  const t = fmtTime.format(last.time * 1000);
+  const age = Math.round((Date.now() / 1000 - last.time) / 60);
+  const zNow = zAtHK(last);
+  const M = R.motion;
+  const speed = M ? Math.hypot(M.gx, M.gy) * KM_PX * 6 : 0;
+  const DIR_TO = ['sever', 'severovýchod', 'východ', 'juhovýchod', 'juh', 'juhozápad', 'západ', 'severozápad'];
+  const toward = M ? DIR_TO[dirIdx((Math.atan2(M.gx, -M.gy) * 180 / Math.PI + 360) % 360)] : '';
+  const moveTxt = M && speed >= 5 ? `pohyb na ${toward} ${r0(speed)} km/h` : 'takmer bez pohybu';
+  const cls = (z) => { const c = rainClass(rateOf(z)); return c ? c.name : 'veľmi slabý'; };
+  let html, level = 'ok';
+  if (zNow >= R_WET) {
+    level = 'warn';
+    const end = R.fc.findIndex((f) => zAtHK(f) < R_WET);
+    html = `V Plotišti práve prší (${cls(zNow)}, ${r1(rateOf(zNow))} mm/h). ` + (end >= 0 ? `Podľa pohybu zrážok (${moveTxt}) skončí asi o <b>${(end + 1) * 10} min</b>.` : `Podľa pohybu zrážok (${moveTxt}) bude pršať aj ďalších 90 min.`);
+  } else {
+    // najbližšie echo
+    let bd = Infinity, bp = null;
+    for (let y = 0; y < RW; y += 2) for (let x = 0; x < RW; x += 2) {
+      if (last.z[y * RW + x] < R_WET) continue;
+      const d = Math.hypot(x - HK_PX[0], y - HK_PX[1]);
+      if (d < bd) { bd = d; bp = [x, y]; }
+    }
+    const arr = R.fc.findIndex((f) => zAtHK(f) >= R_WET);
+    if (!bp || bd * KM_PX > 250) html = 'Do 250 km od Plotišťa radar nevidí žiadne zrážky.';
+    else {
+      const ll = rLonLat(...bp);
+      const dir = DIR_ADV[dirIdx(bearing(HK.lat, HK.lon, ll[1], ll[0]))];
+      const near = `Najbližšie zrážky sú ${r0(bd * KM_PX)} km ${dir}, ${moveTxt}.`;
+      if (arr >= 0) { level = 'warn'; html = `${near} Odhad príchodu do Plotišťa: o <b>${(arr + 1) * 10} min</b> (${cls(zAtHK(R.fc[arr]))}).`; }
+      else html = `${near} V najbližších 90 min by mali Plotiště minúť.`;
+    }
+  }
+  return { html, level, time: t, age, text: `Radar ${t}` };
+}
+
+/* ---- zobrazenie na mape */
+const R_CITIES = [['Praha', 14.42, 50.09], ['Pardubice', 15.78, 50.04], ['Liberec', 15.06, 50.77], ['Jičín', 15.35, 50.44], ['Trutnov', 15.91, 50.56],
+  ['Náchod', 16.16, 50.42], ['Kolín', 15.20, 50.03], ['Chrudim', 15.80, 49.95], ['Ústí n. Orl.', 16.39, 49.97], ['Havlíčkův Brod', 15.58, 49.61],
+  ['Jihlava', 15.59, 49.40], ['Brno', 16.61, 49.20], ['Wrocław', 17.03, 51.11], ['Ústí n. L.', 14.03, 50.66], ['Olomouc', 17.25, 49.59],
+  ['Dresden', 13.74, 51.05], ['Mladá Boleslav', 14.90, 50.41], ['Svitavy', 16.47, 49.75], ['Kłodzko', 16.66, 50.44]];
+const R_STORM = '#ff6bd6';
+let rLut = null;
+function radarLut() {
+  if (rLut) return rLut;
+  rLut = new Uint8ClampedArray(256 * 4); // index = dBZ + 128
+  for (let z = -128; z < 128; z++) {
+    const i = (z + 128) * 4, rate = rateOf(z), c = z >= 50 ? { color: R_STORM } : rainClass(rate);
+    if (z <= NO_ECHO || z < 8) continue;
+    const col = d3.color(c ? c.color : RAIN_CLASSES[0].color);
+    rLut[i] = col.r; rLut[i + 1] = col.g; rLut[i + 2] = col.b; rLut[i + 3] = c ? 225 : 90;
+  }
+  return rLut;
+}
+const rCanvasCache = new WeakMap();
+function radarCanvas(fr) {
+  if (rCanvasCache.has(fr)) return rCanvasCache.get(fr);
+  const cv = document.createElement('canvas'); cv.width = cv.height = RW;
+  const ctx = cv.getContext('2d'), img = ctx.createImageData(RW, RW), d = img.data, lut = radarLut();
+  for (let i = 0; i < fr.z.length; i++) {
+    const li = (fr.z[i] + 128) * 4;
+    d[i * 4] = lut[li]; d[i * 4 + 1] = lut[li + 1]; d[i * 4 + 2] = lut[li + 2]; d[i * 4 + 3] = lut[li + 3];
+  }
+  ctx.putImageData(img, 0, 0);
+  rCanvasCache.set(fr, cv);
+  return cv;
+}
+const radarSeq = () => (state.radar ? [...state.radar.frames, ...state.radar.fc] : []);
+
+function radarProj() {
+  // mierka: polomer ~140 km v kratšom rozmere okna
+  const k = Math.PI * 2 / (2 ** RZ * 256); // radiány na radarový pixel
+  const s = Math.min(map.w, map.h) / 2 / ((140 / KM_PX) * k);
+  return d3.geoMercator().center([HK.lon, HK.lat]).translate([map.w / 2, map.h / 2]).scale(s);
+}
+
+function drawRadarMap() {
+  const ctx = map.canvas.getContext('2d');
+  ctx.setTransform(map.dpr, 0, 0, map.dpr, 0, 0);
+  ctx.clearRect(0, 0, map.w, map.h);
+  ctx.fillStyle = css('--sea'); ctx.fillRect(0, 0, map.w, map.h);
+  const proj = map.rproj = radarProj();
+  const path = d3.geoPath(proj, ctx);
+  ctx.font = '11px ' + css('--mono');
+  const seq = radarSeq();
+  const fr = seq[state.rstep];
+  // oblasť radaru
+  const [x0, y0] = proj(rLonLat(0, 0)), [x1, y1] = proj(rLonLat(RW, RW));
+  ctx.fillStyle = '#ffffff06'; ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+  if (fr) {
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.globalAlpha = fr.fc ? 0.8 : 1;
+    ctx.drawImage(radarCanvas(fr), x0, y0, x1 - x0, y1 - y0);
+    ctx.globalAlpha = 1;
+  }
+  if (!map.coast) { map.coast = toLines(window.EU_GEO.coast); map.borders = toLines(window.EU_GEO.borders); }
+  ctx.beginPath(); path(map.borders); ctx.strokeStyle = '#6f88aa'; ctx.lineWidth = 1.1; ctx.stroke();
+  // kruhy 25 / 50 / 100 km
+  ctx.setLineDash([3, 4]); ctx.strokeStyle = '#8fd3ff55'; ctx.fillStyle = '#8fd3ffaa';
+  for (const km of [25, 50, 100]) {
+    ctx.beginPath(); path(d3.geoCircle().center([HK.lon, HK.lat]).radius(km / 111.2).precision(1)()); ctx.stroke();
+    const lp = proj([HK.lon, HK.lat + km / 111.2]); ctx.fillText(km + ' km', lp[0] + 4, lp[1] - 3);
+  }
+  ctx.setLineDash([]);
+  // vektor pohybu
+  if (state.radar && state.radar.motion) {
+    const M = state.radar.motion, [hx, hy] = proj([HK.lon, HK.lat]);
+    const sc = (x1 - x0) / RW; // obrazovkové px na radarový px
+    const ex = hx + M.gx * 6 * sc, ey = hy + M.gy * 6 * sc; // posun za 60 min
+    if (Math.hypot(ex - hx, ey - hy) > 6) {
+      ctx.strokeStyle = '#ffb547'; ctx.fillStyle = '#ffb547'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(ex, ey); ctx.stroke();
+      const a = Math.atan2(ey - hy, ex - hx);
+      ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - 8 * Math.cos(a - 0.4), ey - 8 * Math.sin(a - 0.4)); ctx.lineTo(ex - 8 * Math.cos(a + 0.4), ey - 8 * Math.sin(a + 0.4)); ctx.fill();
+      ctx.font = '10px ' + css('--mono'); ctx.textAlign = 'center'; ctx.fillText('pohyb za 60 min', ex, ey + (ey >= hy ? 16 : -10)); ctx.textAlign = 'start';
+    }
+  }
+  // mestá
+  ctx.font = '10.5px ' + css('--body');
+  for (const [n, lon, lat] of R_CITIES) {
+    const [x, y] = proj([lon, lat]); if (x < 0 || y < 0 || x > map.w || y > map.h) continue;
+    ctx.fillStyle = '#dbe5f2'; ctx.beginPath(); ctx.arc(x, y, 1.8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#b8c6da'; ctx.fillText(n, x + 5, y + 3.5);
+  }
+  const [hx, hy] = proj([HK.lon, HK.lat]);
+  ctx.beginPath(); ctx.arc(hx, hy, 3, 0, Math.PI * 2); ctx.fillStyle = css('--accent'); ctx.fill();
+  ctx.font = '600 11px ' + css('--mono'); ctx.fillStyle = css('--accent'); ctx.fillText('PLOTIŠTĚ', hx + 8, hy - 8);
+  if (!state.radar) {
+    ctx.fillStyle = '#dbe5f2'; ctx.font = '13px ' + css('--body'); ctx.textAlign = 'center';
+    ctx.fillText(state.radarError ? 'Radar sa nepodarilo načítať.' : 'Načítavam radar…', map.w / 2, map.h / 2 + 40);
+    ctx.textAlign = 'start';
+  }
+  if (fr && fr.fc) {
+    ctx.font = '600 11px ' + css('--mono'); ctx.fillStyle = '#ffb547';
+    ctx.fillText('ODHAD · extrapolácia pohybu', 12, 22);
+  }
+}
+
+function radarReadout(ev) {
+  const fr = radarSeq()[state.rstep]; if (!fr || !map.rproj) return;
+  const r = map.canvas.getBoundingClientRect();
+  const ll = map.rproj.invert([ev.clientX - r.left, ev.clientY - r.top]);
+  const [px, py] = rPx(ll[0], ll[1]).map(Math.round);
+  const el = $('#map-readout');
+  if (px < 0 || py < 0 || px >= RW || py >= RW) { el.innerHTML = 'Mimo radaru'; return; }
+  const z = fr.z[py * RW + px], d = haversine(HK.lat, HK.lon, ll[1], ll[0]);
+  el.innerHTML = `${ll[1].toFixed(2)}° S ${ll[0].toFixed(2)}° V · <b>${r0(d)} km</b> od Plotišťa<br>
+    ${z >= 8 ? `odrazivosť <b>${z} dBZ</b> · intenzita <b>${r1(rateOf(z))} mm/h</b>` : 'bez zrážok'}`;
+}
+
+function renderRadarPanel() {
+  const el = $('#sys-list');
+  $('.systems h3').textContent = 'Radar · odhad na najbližších 90 minút';
+  const R = state.radar;
+  if (!R) { el.innerHTML = `<span class="empty">${state.radarError ? 'Radar nie je dostupný (RainViewer neodpovedá).' : 'Načítavam radar…'}</span>`; return; }
+  const S = R.summary;
+  el.innerHTML = `<div class="radar-sum" data-level="${S.level}"><div class="t">${S.text}${S.age > 25 ? ` · <em>staré ${S.age} min</em>` : ''}</div><p>${S.html}</p>
+    <div class="radar-note">Odhad posúva zrážky v smere ich pohybu za posledných 30 min; nevie, či zosilnejú alebo zoslabnú. Zdroj: RainViewer.</div></div>`;
+}
+
+let radarTimer = null;
+async function refreshRadar() {
+  try {
+    const prevLen = state.radar ? state.radar.frames.length : 0;
+    state.radar = await loadRadar();
+    state.radarError = false;
+    if (state.layer === 'radar' && (!prevLen || state.rstep >= prevLen - 1)) state.rstep = state.radar.frames.length - 1;
+  } catch (e) {
+    console.warn('Radar zlyhal:', e);
+    state.radarError = true;
+  }
+  if (state.layer === 'radar') { renderTimeline(); renderSystems(); drawMap(); }
+  if (state.precip) renderPrecip();
+}
+
 /* ------------------------------------------------------------------ stav, ovládanie */
 function setStatus() {
   const st = $('#status');
@@ -1284,7 +1661,10 @@ async function load(force = false) {
   setStatus();
 }
 
-function setStep(s) { state.step = s; renderTimeline(); drawMap(); }
+function setStep(s) {
+  if (state.layer === 'radar') state.rstep = s; else state.step = s;
+  renderTimeline(); drawMap();
+}
 
 let playTimer = null;
 function togglePlay(on) {
@@ -1292,7 +1672,10 @@ function togglePlay(on) {
   on = on ?? !playTimer;
   clearInterval(playTimer); playTimer = null;
   b.setAttribute('aria-pressed', on); b.textContent = on ? '❚❚ Pauza' : '▶ Prehrať';
-  if (on) playTimer = setInterval(() => setStep((state.step + 1) % state.grid.times.length), 650);
+  if (on) playTimer = setInterval(() => {
+    if (state.layer === 'radar') { const n = radarSeq().length; if (n) setStep((state.rstep + 1) % n); }
+    else setStep((state.step + 1) % state.grid.times.length);
+  }, state.layer === 'radar' ? 450 : 650);
 }
 
 function toggleMax(which) {
@@ -1308,9 +1691,12 @@ function init() {
   renderLegend();
 
   document.querySelectorAll('#layer-seg button').forEach((b) => b.addEventListener('click', () => {
+    const wasRadar = state.layer === 'radar';
     state.layer = b.dataset.layer;
     document.querySelectorAll('#layer-seg button').forEach((x) => x.setAttribute('aria-pressed', x === b));
-    renderLegend(); drawMap();
+    if (state.layer === 'radar' && state.radar) state.rstep = state.radar.frames.length - 1;
+    if (wasRadar !== (state.layer === 'radar')) togglePlay(false);
+    renderLegend(); renderTimeline(); renderSystems(); drawMap();
   }));
   document.querySelectorAll('.max-btn').forEach((b) => b.addEventListener('click', () => toggleMax(b.dataset.max)));
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#windows').dataset.max) toggleMax(null); });
@@ -1329,6 +1715,8 @@ function init() {
 
   load();
   setInterval(() => load(), 30 * 60000); // automatická obnova každých 30 min
+  refreshRadar();
+  setInterval(refreshRadar, 5 * 60000);  // nová radarová snímka každých 10 min
 }
 
 init();
