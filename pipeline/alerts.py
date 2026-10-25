@@ -334,11 +334,65 @@ def chmi_warnings():
 LEVEL_SK = {'yellow': 'Žltá', 'orange': 'Oranžová', 'red': 'Červená'}
 
 
+# ------------------------------------------------------------------ týždenný report
+
+MODEL_SK = {'ecmwf_ifs025': 'ECMWF', 'icon_seamless': 'DWD ICON', 'gfs_seamless': 'NOAA GFS', 'meteofrance_seamless': 'Météo-France',
+            'ukmo_seamless': 'UK Met Office', 'gem_seamless': 'Kanada GEM', 'aladin': 'ČHMÚ ALADIN'}
+DAY_SK = ['po', 'ut', 'st', 'št', 'pi', 'so', 'ne']
+
+
+def weekly_report(F):
+    """Nedeľné zhrnutie: uplynulý týždeň (merania ČHMÚ), presnosť AI a modelov, výhľad na týždeň."""
+    lines = []
+    # uplynulý týždeň – merania
+    with open(os.path.join(ROOT, 'data', 'obs-recent.json')) as f:
+        O = json.load(f)
+    cut = time.time() - 7 * 86400
+    idx = [i for i, t in enumerate(O['time']) if t >= cut]
+    vals = lambda k: [O[k][i] for i in idx if O[k][i] is not None]
+    if vals('t'):
+        lines.append(f'Týždeň: {fmt(min(vals("t")), 1)} až {fmt(max(vals("t")), 1)} °C, zrážky {fmt(sum(vals("precip")), 1)} mm, '
+                     f'najsilnejší náraz {fmt(max(vals("gust") or [0]))} km/h.')
+    # presnosť
+    try:
+        with open(os.path.join(ROOT, 'data', 'skill.json')) as f:
+            S = json.load(f)
+        tt = S.get('test', {}).get('t', {}).get('1')
+        if tt:
+            gain = (tt['mean'] - tt['ai']) / tt['mean'] * 100
+            lines.append(f'AI na zajtra: chyba {fmt(tt["ai"], 1)} °C vs. priemer modelov {fmt(tt["mean"], 1)} °C '
+                         f'({"lepšia o " + fmt(gain) + " %" if gain >= 1 else "horšia o " + fmt(-gain) + " %" if gain <= -1 else "bez rozdielu"}).')
+        best = min(((m, v['t'].get('1', {}).get('mae_corr')) for m, v in S['models'].items() if v['t'].get('1')), key=lambda x: x[1] or 99, default=None)
+        if best and best[1]:
+            lines.append(f'Najpresnejší model: {MODEL_SK.get(best[0], best[0])} ({fmt(best[1], 1)} °C).')
+    except Exception as e:
+        log('report – skill:', e)
+    # výhľad na týždeň (ensemble mediány po dňoch)
+    days = []
+    start = dt.datetime.combine(dt.datetime.now(TZ).date() + dt.timedelta(days=1), dt.time(), TZ)
+    for k in range(7):
+        t0 = (start + dt.timedelta(days=k)).timestamp()
+        idx = [i for i, t in enumerate(F['times']) if t0 <= t < t0 + 86400]
+        if len(idx) < 20:
+            continue
+        med = lambda arrs, fn: float(np.median([fn([m[i] for i in idx if m[i] is not None]) for m in arrs if sum(m[i] is not None for i in idx) > 18]))
+        days.append((start + dt.timedelta(days=k), med(F['t'], min), med(F['t'], max), med(F['p'], sum)))
+    if days:
+        warm = max(days, key=lambda d: d[2])
+        wet = [d for d in days if d[3] >= 1]
+        lines.append(f'Výhľad: {fmt(min(d[1] for d in days))} až {fmt(max(d[2] for d in days))} °C, najteplejšie {DAY_SK[warm[0].weekday()]} ({fmt(warm[2])} °C); '
+                     + (f'dážď hlavne {", ".join(DAY_SK[d[0].weekday()] for d in wet[:3])} (spolu ~{fmt(sum(d[3] for d in days))} mm).' if wet else 'prevažne bez zrážok.'))
+    return '\n'.join(lines)
+
+
 # ------------------------------------------------------------------ main
 
 def main():
     dry = '--dry' in sys.argv
     topic = os.environ.get('NTFY_TOPIC', '').strip()
+    if '--report' in sys.argv:  # skúšobne vypíše týždenný report
+        print(weekly_report(forecast()))
+        return
     if '--test' in sys.argv:
         send(topic, 'Meteo Plotiště: test', 'Upozornenia fungujú. Ťuknutím otvoríš dashboard.', 'white_check_mark', 3, dry)
         return
@@ -449,6 +503,10 @@ def main():
                     send(topic, 'V noci mráz', f'Minimálna teplota asi {fmt(w["tmin_med"], 1)} °C, pravdepodobnosť mrazu {pct(w["p_frost"])}. '
                          'Pozor na námrazu a citlivé rastliny.', 'snowflake', 3, dry)
                 mark(f'mraz-{today}')
+            # týždenný report: nedeľa večer
+            if CFG.get('weekly', True) and local.weekday() == 6 and local.hour >= CFG.get('weekly_hour', 19) and once(f'tyzden-{today}'):
+                send(topic, 'Týždeň v Plotišti', weekly_report(F), 'bar_chart', 2, dry)
+                mark(f'tyzden-{today}')
             # ranné zhrnutie
             if CFG['morning'] and local.hour >= CFG['morning_hour'] and local.hour < CFG['morning_hour'] + 3 and once(f'rano-{today}'):
                 dd = F['det']['daily']

@@ -7,7 +7,7 @@ on:
       mode:
         description: 'test = pošle skúšobnú notifikáciu, dry = len vypíše, čo by poslal'
         type: choice
-        options: [normal, test, dry]
+        options: [normal, test, dry, report]
         default: normal
 permissions:
   contents: write
@@ -40,6 +40,7 @@ jobs:
           ARGS=""
           [ "${{ inputs.mode }}" = "test" ] && ARGS="--test"
           [ "${{ inputs.mode }}" = "dry" ] && ARGS="--dry --force"
+          [ "${{ inputs.mode }}" = "report" ] && ARGS="--report"
           if python pipeline/alerts.py $ARGS 2>&1 | tee run.log; then
             echo "::notice title=Výsledok::$(tail -n 12 run.log | sed ':a;N;$!ba;s/\n/%0A/g')"
           else
