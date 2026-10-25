@@ -258,6 +258,58 @@ def fmt(x, d=0):
     return '–' if x is None else (f'{x:.{d}f}').replace('.', ',')
 
 
+# ------------------------------------------------------------------ výstrahy ČHMÚ (CAP)
+
+CAP_DIR = 'https://opendata.chmi.cz/meteorology/weather/alerts/cap/'
+ORP = '5205'  # obec s rozšírenou pôsobnosťou Hradec Králové (CISORP)
+WARN_PATH = os.path.join(ROOT, 'data', 'warnings.json')
+LEVEL_FROM_SEVERITY = {'Moderate': 'yellow', 'Severe': 'orange', 'Extreme': 'red'}
+
+
+def chmi_warnings():
+    """Platné výstrahy ČHMÚ pre ORP Hradec Králové z najnovších CAP súborov."""
+    import re
+    import xml.etree.ElementTree as ET
+    html = get(CAP_DIR, raw=True).decode('utf-8', 'replace')
+    rows = re.findall(r'href="(alert_cap_(\d+)_\d+\.xml)">[^<]*</a>\s+(\d\d-\w\w\w-\d{4} \d\d:\d\d)', html)
+    latest = {}
+    for name, kind, when in rows:
+        t = dt.datetime.strptime(when, '%d-%b-%Y %H:%M')
+        if kind not in latest or t > latest[kind][1]:
+            latest[kind] = (name, t)
+    ns = {'c': 'urn:oasis:names:tc:emergency:cap:1.2'}
+    now = dt.datetime.now(dt.timezone.utc)
+    out = []
+    for name, _ in latest.values():
+        root = ET.fromstring(get(CAP_DIR + name, raw=True, timeout=90))
+        for info in root.findall('c:info', ns):
+            f = lambda k: (info.findtext('c:' + k, namespaces=ns) or '').strip()
+            if f('language') != 'cs' or f('certainty') == 'Unlikely' or f('event').startswith('Žádn'):
+                continue
+            codes = {g.findtext('c:value', namespaces=ns) for a in info.findall('c:area', ns) for g in a.findall('c:geocode', ns)
+                     if g.findtext('c:valueName', namespaces=ns) == 'CISORP'}
+            if ORP not in codes:
+                continue
+            params = {p.findtext('c:valueName', namespaces=ns): p.findtext('c:value', namespaces=ns) for p in info.findall('c:parameter', ns)}
+            expires = f('expires') or params.get('eventEndingTime') or ''
+            if expires and dt.datetime.fromisoformat(expires) < now:
+                continue
+            level = LEVEL_FROM_SEVERITY.get(f('severity'), 'yellow')
+            al = params.get('awareness_level', '')
+            for c in ('yellow', 'orange', 'red'):
+                if c in al:
+                    level = c
+            out.append({'event': f('event'), 'level': level, 'onset': f('onset'), 'expires': expires,
+                        'certainty': f('certainty'), 'description': f('description'), 'instruction': f('instruction'),
+                        'situation': params.get('situation', ''), 'web': f('web')})
+    order = {'red': 0, 'orange': 1, 'yellow': 2}
+    out.sort(key=lambda w: (order.get(w['level'], 3), w['onset']))
+    return out, sorted(n for n, _ in latest.values())
+
+
+LEVEL_SK = {'yellow': 'Žltá', 'orange': 'Oranžová', 'red': 'Červená'}
+
+
 # ------------------------------------------------------------------ main
 
 def main():
@@ -382,6 +434,28 @@ def main():
                 mark(f'rano-{today}')
         except Exception as e:
             log('predpoveď zlyhala:', e)
+
+    # --- výstrahy ČHMÚ
+    try:
+        warns, files = chmi_warnings()
+        log(f'ČHMÚ: {len(warns)} platných výstrah pre ORP Hradec Králové ({", ".join(files)})')
+        old = None
+        if os.path.exists(WARN_PATH):
+            with open(WARN_PATH) as f:
+                old = json.load(f).get('warnings')
+        if old != warns:
+            with open(WARN_PATH, 'w') as f:
+                json.dump({'updated': int(now), 'area': 'ORP Hradec Králové', 'warnings': warns}, f, ensure_ascii=False, indent=1)
+        for w in warns:
+            key = f'chmi-{w["event"]}-{w["onset"]}-{w["level"]}'
+            if once(key):
+                t = lambda x: dt.datetime.fromisoformat(x).astimezone(TZ).strftime('%d.%m. %H:%M') if x else '?'
+                first = w['description'].split('\n')[0]
+                send(topic, f'ČHMÚ: {w["event"]}', f'{LEVEL_SK.get(w["level"], "")} výstraha pre Hradec Králové, {t(w["onset"])} – {t(w["expires"])}. {first}',
+                     'rotating_light' if w['level'] != 'yellow' else 'warning', {'yellow': 4, 'orange': 5, 'red': 5}.get(w['level'], 4), dry)
+                sent[key] = now + 6 * 86400  # podržať v stave dlhšie, výstrahy trvajú aj niekoľko dní
+    except Exception as e:
+        log('výstrahy ČHMÚ zlyhali:', e)
 
     # upratať staré záznamy
     for k in [k for k, t in sent.items() if now - t > 7 * 86400]:

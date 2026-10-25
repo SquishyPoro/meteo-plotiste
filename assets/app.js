@@ -1629,6 +1629,31 @@ async function refreshRadar() {
   if (state.precip) renderPrecip();
 }
 
+/* ------------------------------------------------------------------ VÝSTRAHY ČHMÚ (data/warnings.json z GitHub Actions) */
+const WARN_LEVEL = { yellow: tx('Žltá výstraha', 'Žlutá výstraha'), orange: tx('Oranžová výstraha', 'Oranžová výstraha'), red: tx('Červená výstraha', 'Červená výstraha') };
+const fmtWarnTime = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+async function refreshWarnings() {
+  try {
+    state.warnings = await fetchJSON(`data/warnings.json?v=${Math.floor(Date.now() / 120000)}`, 15000);
+  } catch { state.warnings = null; }
+  renderWarnings();
+}
+
+function renderWarnings() {
+  const el = $('#warnings');
+  const now = Date.now();
+  const list = (state.warnings && state.warnings.warnings || []).filter((w) => !w.expires || new Date(w.expires).getTime() > now);
+  el.hidden = !list.length;
+  const t = (x) => (x ? cap(fmtWarnTime.format(new Date(x))) : '?');
+  el.innerHTML = list.map((w) => `<details class="warn" data-level="${esc(w.level)}">
+    <summary><span class="lv">ČHMÚ · ${WARN_LEVEL[w.level] || ''}</span><span class="ev">${esc(w.event)}</span>
+      <span class="tm">${new Date(w.onset).getTime() > now ? tx('od', 'od') + ' ' + t(w.onset) + ' ' : ''}${tx('do', 'do')} ${t(w.expires)}</span></summary>
+    <div class="body">${w.description ? `<p>${esc(w.description)}</p>` : ''}${w.instruction ? `<p class="ins">${esc(w.instruction)}</p>` : ''}
+      <a href="${esc(w.web || 'https://vystrahy-cr.chmi.cz/')}" target="_blank" rel="noopener">vystrahy-cr.chmi.cz ↗</a></div></details>`).join('');
+}
+
 /* ------------------------------------------------------------------ stav, ovládanie */
 function setStatus() {
   const st = $('#status');
@@ -1755,7 +1780,9 @@ function init() {
   load();
   setInterval(() => load(), 30 * 60000); // automatická obnova každých 30 min
   refreshRadar();
-  setInterval(refreshRadar, 5 * 60000);  // nová radarová snímka každých 10 min
+  setInterval(refreshRadar, 5 * 60000);
+  refreshWarnings();
+  setInterval(refreshWarnings, 5 * 60000);  // nová radarová snímka každých 10 min
 }
 
 init();

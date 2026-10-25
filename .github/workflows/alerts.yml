@@ -10,7 +10,7 @@ on:
         options: [normal, test, dry]
         default: normal
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: alerts
   cancel-in-progress: false
@@ -46,6 +46,14 @@ jobs:
             echo "::error title=Chyba::$(tail -n 25 run.log | sed ':a;N;$!ba;s/\n/%0A/g')"
             exit 1
           fi
+      - name: Uložiť výstrahy ČHMÚ pre dashboard
+        run: |
+          git add data/warnings.json 2>/dev/null || exit 0
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name "meteo-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Výstrahy ČHMÚ $(date -u +'%Y-%m-%d %H:%M') UTC"
+          for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done
       - name: Uložiť stav upozornení
         if: always()
         uses: actions/cache/save@v4
