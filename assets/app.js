@@ -2084,6 +2084,39 @@ function drawClimateCharts() {
     () => '#8f9cff', 100, '%', (d) => row(tx('úhrn', 'úhrn'), r1(d.p) + ' mm') + row(tx('normál', 'normál'), r1(d.pn) + ' mm'));
 }
 
+/* ------------------------------------------------------------------ VÝHĽAD NA 6 TÝŽDŇOV (Open-Meteo Seasonal, týždenné odchýlky) */
+async function loadOutlookLive() {
+  return fetchJSON('https://seasonal-api.open-meteo.com/v1/seasonal?' + qs({
+    latitude: HK.lat, longitude: HK.lon, weekly: 'temperature_2m_anomaly,precipitation_anomaly', forecast_days: 49,
+  }));
+}
+
+async function renderOutlook() {
+  const el = $('#outlook');
+  let O;
+  try {
+    O = await liveOrStale('mp-outlook-v1', 360, false, async () => { const d = await loadOutlookLive(); cacheSet('mp-outlook-v1', d); return d; });
+  } catch { el.hidden = true; return; }
+  const w = O.weekly;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const weeks = w.time.map((t, i) => ({ start: new Date(t + 'T00:00:00'), ta: w.temperature_2m_anomaly[i], pa: w.precipitation_anomaly[i] }))
+    .filter((x) => x.ta != null && x.start.getTime() + 6 * 86400000 >= today.getTime()).slice(0, 6);
+  if (!weeks.length) { el.hidden = true; return; }
+  el.hidden = false;
+  const fmtD = new Intl.DateTimeFormat(LOCALE, { day: 'numeric', month: 'numeric' });
+  const tLabel = (a) => (a >= 1.5 ? tx('výrazne teplejšie', 'výrazně tepleji') : a >= 0.5 ? tx('teplejšie', 'tepleji') : a <= -1.5 ? tx('výrazne chladnejšie', 'výrazně chladněji') : a <= -0.5 ? tx('chladnejšie', 'chladněji') : tx('normálne', 'normálně'));
+  const pLabel = (a) => (a >= 5 ? tx('vlhkejšie', 'vlhčeji') : a <= -5 ? tx('sušejšie', 'sušeji') : tx('normálne', 'normálně'));
+  const tCol = (a) => (a >= 0.5 ? `rgba(255, 138, 92, ${Math.min(0.85, 0.25 + Math.abs(a) * 0.2)})` : a <= -0.5 ? `rgba(95, 168, 255, ${Math.min(0.85, 0.25 + Math.abs(a) * 0.2)})` : 'rgba(255,255,255,0.05)');
+  el.innerHTML = `<h3>${tx('Výhľad na 6 týždňov · odchýlka od normálu', 'Výhled na 6 týdnů · odchylka od normálu')}</h3>
+    <div class="outlook">${weeks.map((x) => {
+      const end = new Date(x.start.getTime() + 6 * 86400000);
+      return `<div class="wk"><div class="d">${fmtD.format(x.start)}–${fmtD.format(end)}</div>
+        <div class="t" style="background:${tCol(x.ta)}"><b>${x.ta > 0 ? '+' : ''}${r1(x.ta)} °C</b><span>${tLabel(x.ta)}</span></div>
+        <div class="p"><b>${x.pa > 0 ? '+' : ''}${r0(x.pa)} mm</b><span>${pLabel(x.pa)}</span></div></div>`;
+    }).join('')}</div>
+    <div class="skill-note">${tx('Dlhodobý výhľad ukazuje len trend – presnosť po 2. týždni rýchlo klesá. Zdroj: sezónny model cez Open-Meteo.', 'Dlouhodobý výhled ukazuje jen trend – přesnost po 2. týdnu rychle klesá. Zdroj: sezónní model přes Open-Meteo.')}</div>`;
+}
+
 /* ------------------------------------------------------------------ VÝSTRAHY ČHMÚ (data/warnings.json z GitHub Actions) */
 const WARN_LEVEL = { yellow: tx('Žltá výstraha', 'Žlutá výstraha'), orange: tx('Oranžová výstraha', 'Oranžová výstraha'), red: tx('Červená výstraha', 'Červená výstraha') };
 const fmtWarnTime = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -2158,7 +2191,7 @@ async function load(force = false) {
   state.step = Math.min(state.step, state.grid.times.length - 1);
 
   state.winter = wi.status === 'fulfilled' ? wi.value : null;
-  renderNow(); renderPrecip(); renderWinter(); renderSummary(); renderRisk(); renderSkill();
+  renderNow(); renderPrecip(); renderWinter(); renderSummary(); renderOutlook(); renderRisk(); renderSkill();
   if (!charts.length) setupCharts();
   drawCharts();
   renderLegend(); renderTimeline(); renderSystems();
