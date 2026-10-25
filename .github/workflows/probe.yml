@@ -1,0 +1,25 @@
+name: probe-sources
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe
+        run: |
+          set +e
+          mkdir out && cd out
+          Q="latitude=50.236&longitude=15.79&timeformat=unixtime&timezone=Europe%2FPrague"
+          curl -sS -m 60 "https://api.open-meteo.com/v1/forecast?$Q&minutely_15=precipitation,rain,snowfall,precipitation_probability&models=icon_d2&forecast_minutely_15=24" > m15-icond2.json
+          curl -sS -m 60 "https://api.open-meteo.com/v1/forecast?$Q&minutely_15=precipitation&forecast_minutely_15=24" > m15-best.json
+          for m in icon_d2 knmi_harmonie_arome_europe dmi_harmonie_arome_europe meteofrance_arome_france_hd icon_eu ecmwf_ifs025 ukmo_global_deterministic_10km; do
+            echo "=== $m"; curl -sS -m 60 "https://api.open-meteo.com/v1/forecast?$Q&hourly=precipitation&models=$m&forecast_hours=6" | head -c 600; echo
+          done > hourly-models.txt
+          curl -sS -m 30 https://api.rainviewer.com/public/weather-maps.json > rainviewer.json
+          curl -sS -m 60 https://opendata.chmi.cz/meteorology/weather/ | sed 's/<[^>]*>/ /g' | tr -s ' \n' > chmi-weather.txt
+          curl -sS -m 60 https://opendata.chmi.cz/meteorology/weather/radar/ | sed 's/<[^>]*>/ /g' | tr -s ' \n' | head -c 3000 >> chmi-weather.txt
+          cd .. && git init -q probe && cp out/* probe/ && cd probe
+          git config user.name probe && git config user.email probe@users.noreply.github.com
+          git add -A && git commit -qm probe
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" HEAD:refs/heads/probe-out
