@@ -230,7 +230,7 @@ def forecast():
     q = f'latitude={HK[0]}&longitude={HK[1]}&timezone=Europe%2FPrague&timeformat=unixtime&forecast_days=3'
     ens = get(f'https://ensemble-api.open-meteo.com/v1/ensemble?{q}&hourly=temperature_2m,precipitation,wind_gusts_10m,cape'
               '&models=ecmwf_ifs025,icon_seamless,gfs025', timeout=60)
-    det = get(f'https://api.open-meteo.com/v1/forecast?{q}&hourly=temperature_2m,precipitation,wind_gusts_10m,precipitation_probability'
+    det = get(f'https://api.open-meteo.com/v1/forecast?{q}&hourly=temperature_2m,precipitation,wind_gusts_10m,precipitation_probability,cloud_cover'
               '&daily=temperature_2m_min,temperature_2m_max,precipitation_sum,wind_gusts_10m_max,weather_code,uv_index_max')
     m15 = get(f'https://api.open-meteo.com/v1/forecast?latitude={HK[0]}&longitude={HK[1]}&models=icon_d2&timeformat=unixtime'
               '&minutely_15=precipitation&forecast_minutely_15=8')
@@ -551,6 +551,25 @@ def main():
                     send(topic, 'V noci mráz', f'Minimálna teplota asi {fmt(w["tmin_med"], 1)} °C, pravdepodobnosť mrazu {pct(w["p_frost"])}. '
                          'Pozor na námrazu a citlivé rastliny.', 'snowflake', 3, dry)
                 mark(f'mraz-{today}')
+            # polárna žiara: večer (od 16 h) pri Kp >= aurora_kp a nie úplne zamračenej oblohe
+            if CFG.get('aurora', True) and local.hour >= 16 and once(f'ziara-{today}'):
+                try:
+                    kp = get('https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json')
+                    rows = [(dt.datetime.fromisoformat((r['time_tag'] if isinstance(r, dict) else r[0]).replace('Z', '')).replace(tzinfo=dt.timezone.utc).timestamp(),
+                             float(r['kp'] if isinstance(r, dict) else r[1])) for r in (kp if isinstance(kp[0], dict) else kp[1:])]
+                    t0 = dt.datetime.combine(today, dt.time(18), TZ).timestamp()
+                    night = [k for t, k in rows if t + 3 * 3600 > t0 and t < t0 + 12 * 3600]
+                    hh = F['det']['hourly']
+                    cc = [c for t, c in zip(hh['time'], hh['cloud_cover']) if t0 <= t < t0 + 12 * 3600 and c is not None]
+                    mx = max(night) if night else 0
+                    log(f'polárna žiara: max Kp v noci {mx}, min. oblačnosť {min(cc) if cc else "?"} %')
+                    if mx >= CFG.get('aurora_kp', 6) and (not cc or min(cc) < 70):
+                        vis = 'dobre viditeľná voľným okom' if mx >= 7 else 'možno slabo viditeľná, určite na fotkách'
+                        send(topic, 'Dnes v noci možná polárna žiara', f'Predpoveď geomagnetickej aktivity Kp až {fmt(mx, 1)} – {vis}. '
+                             f'Pozeraj na sever, ďalej od svetiel.{" Obloha by mala byť aspoň čiastočne jasná." if cc else ""}', 'milky_way', 4, dry)
+                    mark(f'ziara-{today}')
+                except Exception as e:
+                    log('polárna žiara zlyhala:', e)
             # týždenný report: nedeľa večer
             if CFG.get('weekly', True) and local.weekday() == 6 and local.hour >= CFG.get('weekly_hour', 19) and once(f'tyzden-{today}'):
                 send(topic, 'Týždeň v Plotišti', weekly_report(F), 'bar_chart', 2, dry)

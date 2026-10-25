@@ -148,7 +148,7 @@ async function loadLocalLive() {
     fetchJSON('https://api.open-meteo.com/v1/forecast?' + qs({
       ...base,
       current: 'temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,precipitation',
-      hourly: 'pressure_msl',
+      hourly: 'pressure_msl,cloud_cover',
       daily: 'sunrise,sunset,weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_gusts_10m_max,uv_index_max,daylight_duration',
     })),
     fetchJSON('https://api.open-meteo.com/v1/forecast?' + qs({
@@ -186,6 +186,7 @@ async function loadLocalLive() {
     times, models,
     ens: { t: members('temperature_2m'), p: members('precipitation'), g: members('wind_gusts_10m'), cape: members('cape') },
     current: { ...cur.current, pressure_trend: p3 },
+    clouds: { time: cur.hourly.time, cc: cur.hourly.cloud_cover },
     sun: cur.daily.sunrise.map((r, i) => [r, cur.daily.sunset[i]]),
     daily: cur.daily,
     elevation: det.elevation,
@@ -2400,6 +2401,31 @@ const UV_LV = [[3, 'ok', tx('nízky', 'nízký'), ''], [6, 'warn', tx('stredný'
   [8, 'serious', tx('vysoký', 'vysoký'), tx('opaľovací krém, obed v tieni', 'opalovací krém, poledne ve stínu')], [11, 'crit', tx('veľmi vysoký', 'velmi vysoký'), tx('vyhni sa slnku 11–15 h', 'vyhni se slunci 11–15 h')],
   [99, 'crit', tx('extrémny', 'extrémní'), tx('zostaň v tieni', 'zůstaň ve stínu')]];
 
+/* ---- polárna žiara: predpoveď Kp (NOAA SWPC) + tma + oblačnosť v Plotišti */
+async function loadAurora() {
+  const kp = await fetchJSON('https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json', 15000);
+  return kp.map((r) => (Array.isArray(r) ? { t: Date.parse(r[0] + 'Z') / 1000, kp: +r[1], kind: r[2] } : { t: Date.parse(r.time_tag + 'Z') / 1000, kp: +r.kp, kind: r.observed }))
+    .filter((r) => Number.isFinite(r.kp));
+}
+// pre ~50° s. š.: Kp 5 = len na fotkách pri severnom obzore, 6 = slabá voľným okom, 7+ = dobre viditeľná
+const auroraLevel = (kp) => (kp >= 7 ? 3 : kp >= 6 ? 2 : kp >= 5 ? 1 : 0);
+function auroraNights() {
+  const A = state.aurora, L = state.local;
+  if (!A) return [];
+  const nights = [];
+  for (let k = 0; k < 3; k++) {
+    const d = new Date(); d.setHours(18, 0, 0, 0); d.setDate(d.getDate() + k);
+    const t0 = d.getTime() / 1000, t1 = t0 + 12 * 3600;
+    const ks = A.filter((r) => r.t + 3 * 3600 > t0 && r.t < t1);
+    if (!ks.length) continue;
+    const mx = ks.reduce((a, b) => (b.kp > a.kp ? b : a));
+    let cc = null;
+    if (L && L.clouds) { const v = L.clouds.time.map((t, i) => (t >= t0 && t < t1 ? L.clouds.cc[i] : null)).filter((x) => x != null); if (v.length) cc = Math.min(...v); }
+    nights.push({ t0, kp: mx.kp, at: mx.t, lvl: auroraLevel(mx.kp), cc });
+  }
+  return nights;
+}
+
 function renderSky() {
   const el = $('#sky');
   const L = state.local; if (!L) { el.hidden = true; return; }
@@ -2415,7 +2441,7 @@ function renderSky() {
   const uvl = uv == null ? null : UV_LV.find(([mx]) => uv < mx);
   const uvTom = L.daily && L.daily.uv_index_max ? L.daily.uv_index_max[1] : null;
   el.hidden = false;
-  el.dataset.n = uv != null ? 3 : 2;
+  el.dataset.n = (uv != null ? 3 : 2) + (state.aurora ? 1 : 0);
   el.innerHTML = `<div class="sky-sun">
       <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><circle cx="12" cy="12" r="5" fill="#ffc94d"/><g stroke="#ffc94d" stroke-width="1.6" stroke-linecap="round"><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></g></svg>
       <div><b>${fmtTime.format(rise * 1000)} – ${fmtTime.format(set * 1000)}</b>
@@ -2424,6 +2450,16 @@ function renderSky() {
     <div class="sky-moon">${moonSvg(M.f)}
       <div><b>${cap(M.name)}</b><span>${tx('osvetlené', 'osvětleno')} ${Math.round(M.illum * 100)} %</span>
         <span>${tx('spln', 'úplněk')} ${dayShort(M.full)}${Math.abs(M.full - t) > 86400 * 20 ? '' : ''} · ${tx('nov', 'nov')} ${dayShort(M.nw)}</span></div></div>
+    ${(() => {
+      const N = auroraNights(); if (!N.length) return '';
+      const best = N.reduce((a, b) => (b.kp > a.kp ? b : a));
+      const txt = [tx('nízka šanca', 'nízká šance'), tx('možná na fotkách pri severnom obzore', 'možná na fotkách u severního obzoru'), tx('možno slabo viditeľná voľným okom', 'možná slabě viditelná pouhým okem'), tx('dobre viditeľná – pozri na sever!', 'dobře viditelná – podívej se na sever!')][best.lvl];
+      const night = best.t0 < Date.now() / 1000 + 12 * 3600 ? tx('dnes v noci', 'dnes v noci') : dayShort(best.t0);
+      const clouds = best.lvl && best.cc != null ? (best.cc < 40 ? tx(', obloha jasná', ', obloha jasná') : best.cc < 80 ? tx(', čiastočne zamračené', ', částečně zataženo') : tx(', ale zamračené', ', ale zataženo')) : '';
+      return `<div class="sky-aur" data-level="${['', 'warn', 'serious', 'crit'][best.lvl]}">
+        <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path d="M2 18c3-8 6-11 10-11s7 3 10 11" fill="none" stroke="#5dffb0" stroke-width="2" opacity=".85"/><path d="M5 18c2-5 4-7 7-7s5 2 7 7" fill="none" stroke="#b07dff" stroke-width="1.6" opacity=".8"/></svg>
+        <div><b>${tx('Polárna žiara', 'Polární záře')} · Kp ${r1(best.kp)}</b><span>${best.lvl ? night + ': ' : ''}${txt}${clouds}</span></div></div>`;
+    })()}
     ${uv != null ? `<div class="sky-uv"><span class="chip" data-level="${uvl[1]}">UV ${r0(uv)}</span>
       <div><b>${uvl[2]}</b><span>${uvl[3] || tx('ochrana nie je potrebná', 'ochrana není potřeba')}${uvTom != null ? ` · ${tx('zajtra', 'zítra')} ${r0(uvTom)}` : ''}</span></div></div>` : ''}`;
 }
@@ -2521,8 +2557,8 @@ function setStatus() {
 async function load(force = false) {
   const st = $('#status'); st.dataset.state = 'loading'; st.querySelector('span').textContent = tx('Načítavam', 'Načítám');
   state.staleAt = null;
-  const getLocal = () => liveOrStale('mp-local-v3', 30, force, async () => {
-    const d = await loadLocalLive(); cacheSet('mp-local-v3', d); return d;
+  const getLocal = () => liveOrStale('mp-local-v4', 30, force, async () => {
+    const d = await loadLocalLive(); cacheSet('mp-local-v4', d); return d;
   });
   const reviveGrid = (c) => ({ ...c, P: c.P.map((a) => Float32Array.from(Object.values(a))), G: c.G.map((a) => Float32Array.from(Object.values(a))), R: c.R.map((a) => Float32Array.from(Object.values(a))), C: c.C.map((a) => Float32Array.from(Object.values(a))) });
   const getGrid = () => liveOrStale('mp-grid-v1', 60, force, async () => {
@@ -2673,6 +2709,8 @@ function init() {
   setInterval(refreshRadar, 5 * 60000);
   refreshWarnings();
   setInterval(refreshWarnings, 5 * 60000);
+  const aur = () => loadAurora().then((a) => { state.aurora = a; renderSky(); }).catch((e) => console.warn('Polárna žiara:', e));
+  aur(); setInterval(aur, 30 * 60000);
   refreshRivers();
   setInterval(refreshRivers, 10 * 60000);  // nová radarová snímka každých 10 min
 }

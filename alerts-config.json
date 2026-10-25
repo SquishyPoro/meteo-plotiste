@@ -18,6 +18,8 @@
   "frost_hour": 18,
   "morning": true,
   "morning_hour": 6,
+  "aurora": true,
+  "aurora_kp": 6,
   "weekly": true,
   "weekly_hour": 19,
   "quiet_hours": [22, 6]

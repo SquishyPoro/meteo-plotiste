@@ -381,13 +381,15 @@ table.vt td.bad { color: var(--serious); }
 
 /* slnko, mesiac, UV */
 .sky { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
-.sky[data-n="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sky[data-n="2"], .sky[data-n="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sky-aur[data-level="warn"] b { color: var(--warn); }
+.sky-aur[data-level="serious"] b, .sky-aur[data-level="crit"] b { color: #5dffb0; }
 .sky > div { background: var(--panel); padding: 8px 10px; display: flex; gap: 9px; align-items: flex-start; min-width: 0; }
 .sky > div > div { display: grid; gap: 1px; min-width: 0; }
 .sky b { font: 500 13.5px var(--mono); }
 .sky span { font: 11px var(--mono); color: var(--muted); }
 .sky svg { flex: none; }
-@media (max-width: 560px) { .sky { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) { .sky, .sky[data-n] { grid-template-columns: minmax(0, 1fr); } }
 
 /* rieky */
 .rivers { border: 1px solid var(--line); border-radius: 3px; padding: 10px 12px; background: #0b1424; display: grid; gap: 8px; }
