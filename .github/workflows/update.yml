@@ -23,7 +23,14 @@ jobs:
         with:
           python-version: '3.12'
       - name: Zber a vyhodnotenie
-        run: python pipeline/update.py ${{ inputs.train && '--train' || '' }}
+        run: |
+          set -o pipefail
+          if python pipeline/update.py ${{ inputs.train && '--train' || '' }} 2>&1 | tee run.log; then
+            echo "::notice title=Výsledok::$(tail -n 12 run.log | sed ':a;N;$!ba;s/\n/%0A/g')"
+          else
+            echo "::error title=Chyba::$(tail -n 25 run.log | sed ':a;N;$!ba;s/\n/%0A/g')"
+            exit 1
+          fi
       - name: Uložiť dáta
         run: |
           git config user.name "meteo-bot"
