@@ -63,9 +63,19 @@ def latest_run():
     return best
 
 
+def step_of(m):
+    """Predstih správy v hodinách (pri kumulovaných poliach koniec intervalu)."""
+    for k in ('endStep', 'forecastTime', 'step'):
+        try:
+            return int(m[k])
+        except Exception:
+            continue
+    raise RuntimeError('správa bez predstihu')
+
+
 def point_series(path, kind):
     g = pygrib.open(path)
-    msgs = sorted(g, key=lambda m: m.forecastTime)
+    msgs = sorted(g, key=step_of)
     lats, lons = msgs[0].latlons()
     d = (lats - HK[0]) ** 2 + ((lons - HK[1]) * np.cos(np.radians(HK[0]))) ** 2
     j, i = np.unravel_index(d.argmin(), d.shape)
@@ -78,7 +88,7 @@ def point_series(path, kind):
             x = float(np.max(v[j - 1:j + 2, i - 1:i + 2]))
         else:
             x = float(v[j, i])
-        steps.append(int(m.forecastTime))
+        steps.append(step_of(m))
         vals.append(x)
     g.close()
     return steps, vals
