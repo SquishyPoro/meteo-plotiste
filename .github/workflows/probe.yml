@@ -1,0 +1,31 @@
+name: probe-sources
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe
+        run: |
+          set +e
+          mkdir out && cd out
+          O="Origin: https://squishyporo.github.io"
+          {
+          echo "=== rainviewer maps"; curl -sS -m 30 -D - -H "$O" https://api.rainviewer.com/public/weather-maps.json -o rv.json | grep -i "access-control\|content-type\|HTTP/"
+          P=$(python3 -c "import json;d=json.load(open('rv.json'));print(d['host']+d['radar']['past'][-1]['path'])")
+          for z in 6 7 8; do echo "=== tile z$z"; curl -sS -m 30 -D - -H "$O" "$P/512/$z/$((70*(2**z)/128))/$((43*(2**z)/128))/2/1_0.png" -o tile$z.png | grep -i "access-control\|content-type\|HTTP/\|content-length"; done
+          echo "=== rainviewer 256 z7 x70 y43"; curl -sS -m 30 -D - -H "$O" "$P/256/7/70/43/2/1_0.png" -o t256.png | grep -i "HTTP/\|access-control\|content-length"
+          echo "=== coords variant"; curl -sS -m 30 -D - -H "$O" "$P/256/7/50.23/15.79/2/1_0.png" -o tc.png | grep -i "HTTP/\|access-control\|content-length"
+          } > rainviewer.txt 2>&1
+          R=https://opendata.chmi.cz/meteorology/weather/radar/composite
+          { curl -sS -m 60 $R/ | sed 's/<[^>]*>/ /g' | tr -s ' \n'
+            for d in $(curl -sS -m 60 $R/ | grep -o 'href="[^"]*/"' | cut -d'"' -f2 | grep -v '\.\.'); do echo "=== $d"; curl -sS -m 60 "$R/$d" | sed 's/<[^>]*>/ /g' | tr -s ' \n' | head -c 1200; echo
+              for e in $(curl -sS -m 60 "$R/$d" | grep -o 'href="[^"]*/"' | cut -d'"' -f2 | grep -v '\.\.' | head -4); do echo "--- $d$e"; curl -sS -m 60 "$R/$d$e" | sed 's/<[^>]*>/ /g' | tr -s ' \n' | tail -c 700; echo; done
+            done
+          } > chmi-radar.txt 2>&1
+          echo "=== CORS chmi" >> chmi-radar.txt; curl -sS -m 30 -D - -o /dev/null -H "$O" $R/ | grep -i "access-control\|HTTP/" >> chmi-radar.txt
+          cd .. && git init -q probe && cp out/* probe/ && cd probe
+          git config user.name probe && git config user.email probe@users.noreply.github.com
+          git add -A && git commit -qm probe
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" HEAD:refs/heads/probe-out
