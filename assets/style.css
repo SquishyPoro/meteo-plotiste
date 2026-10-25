@@ -263,6 +263,28 @@ table.risk td[data-level="low"] { color: var(--muted); }
 .tip .r span:last-child { color: var(--fg); }
 .tip hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
 
+/* zrážky detailne */
+.precip { border: 1px solid var(--line); border-radius: 3px; padding: 10px 12px; background: #0b1424; display: grid; gap: 8px; }
+.precip .chart-head h3 { margin: 0; }
+.precip-head { margin: 0; max-width: 65ch; }
+.precip-head b { font-weight: 600; }
+.precip-key { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 10.5px var(--mono); color: var(--muted); }
+.precip-key span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
+.precip-key .u::before { display: none; }
+.precip-key .u { color: var(--dim); }
+.sub-h { margin: 4px 0 0; font: 600 11px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.pm-wrap { overflow-x: auto; }
+table.pm { border-collapse: separate; border-spacing: 2px; font: 11px var(--mono); font-variant-numeric: tabular-nums; }
+table.pm th { font-weight: 500; color: var(--muted); padding: 1px 2px; text-align: center; white-space: nowrap; }
+table.pm tr.days th { color: var(--fg); text-align: left; font-size: 10.5px; }
+table.pm th.m { text-align: left; color: var(--fg); font: 12px var(--body); padding-right: 6px; position: sticky; left: 0; background: #0b1424; }
+table.pm th.m small { display: block; color: var(--dim); font: 10px var(--mono); }
+table.pm td { min-width: 30px; height: 26px; text-align: center; border-radius: 2px; background: #0f1a2b; color: var(--dim); }
+table.pm td[data-c] { background: var(--c); color: #e8eeff; }
+table.pm td[data-c="2"], table.pm td[data-c="3"] { color: #0b1424; font-weight: 600; }
+table.pm tr.prob td { background: rgba(143, 156, 255, var(--a, 0)); color: var(--fg); }
+table.pm tr.prob td.na { background: #0f1a2b; color: var(--dim); }
+
 /* presnosť modelov */
 .skill-lead { font-size: 12.5px; margin: 0 0 8px; max-width: 65ch; }
 .skill-lead b { font-family: var(--mono); font-weight: 500; }

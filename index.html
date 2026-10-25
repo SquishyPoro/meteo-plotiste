@@ -68,7 +68,7 @@
     <section class="win" id="win-local" aria-label="Plotiště nad Labem">
       <div class="win-head">
         <h2>Plotiště n. L.</h2>
-        <span class="sub">6 modelov · 3 ensemble · merania ČHMÚ</span>
+        <span class="sub">10 modelov · 3 ensemble · merania ČHMÚ</span>
         <span class="spacer"></span>
         <button class="max-btn" type="button" data-max="local" aria-label="Zväčšiť okno Plotiště" title="Zväčšiť / zmenšiť (Esc)">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/></svg>
@@ -78,6 +78,7 @@
         <div class="local-side">
           <div class="now" id="now"></div>
           <dl class="kv" id="now-kv"></dl>
+          <div class="block precip" id="precip"></div>
           <div class="summary" id="summary"></div>
           <div class="block">
             <h3>Pravdepodobnosť javov (ensemble, 7 dní)</h3>
@@ -95,7 +96,7 @@
           <div class="chart" id="ch-temp"></div>
           <div class="chart" id="ch-rain"></div>
           <div class="chart" id="ch-wind"></div>
-          <p class="foot">Zdroje: Open-Meteo (ECMWF, DWD ICON, NOAA GFS, Météo-France, UK Met Office, Kanada GEM),
+          <p class="foot">Zdroje: Open-Meteo (ECMWF, DWD ICON, ICON-D2, ICON-EU, HARMONIE-AROME KNMI a DMI, NOAA GFS, Météo-France, UK Met Office, Kanada GEM),
             ensemble ECMWF ENS, ICON-EPS, GEFS. Merania: ČHMÚ, stanica Hradec Králové – Svobodné Dvory
             (záloha Nový Hradec Králové). Obrysy máp: Natural Earth.</p>
         </div>

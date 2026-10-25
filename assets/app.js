@@ -22,7 +22,8 @@ const STEP_H = 3, MAX_STEPS = 41; // 0 … 120 h
 const DAYS = 7;
 
 const $ = (s) => document.querySelector(s);
-const state = { local: null, grid: null, tracks: [], layer: 'wind', step: 0, demo: { local: false, grid: false }, skill: null, obs: null };
+const state = { local: null, grid: null, tracks: [], layer: 'wind', step: 0, demo: { local: false, grid: false }, skill: null, obs: null, precip: null, precipRange: 12 };
+try { const r = +localStorage.getItem('mp-precip-range'); if ([3, 12, 48].includes(r)) state.precipRange = r; } catch { /* nevadí */ }
 const OBS_COLOR = '#f2c46d';
 const AI_COLOR = '#8fd3ff';
 
@@ -1024,6 +1025,212 @@ function setupCharts() {
 
 function drawCharts() { if (state.local) charts.forEach(drawChart); }
 
+/* ------------------------------------------------------------------ ZRÁŽKY DETAILNE (15 min + po hodinách) */
+const HIRES = [
+  { id: 'icon_d2', name: 'ICON-D2', res: '2 km' },
+  { id: 'knmi_harmonie_arome_europe', name: 'HARMONIE KNMI', res: '2 km' },
+  { id: 'dmi_harmonie_arome_europe', name: 'HARMONIE DMI', res: '2 km' },
+  { id: 'icon_eu', name: 'ICON-EU', res: '7 km' },
+];
+const WET = 0.05; // mm za 15 min (= 0,2 mm/h)
+// intenzita podľa mm/h
+const RAIN_CLASSES = [
+  { min: 0.1, name: 'slabý', color: '#2f4f8f' },
+  { min: 1, name: 'mierny', color: '#4f7be0' },
+  { min: 4, name: 'silný', color: '#93acff' },
+  { min: 10, name: 'prívalový', color: '#e6ebff' },
+];
+const rainClass = (mmh) => { let c = null; for (const k of RAIN_CLASSES) if (mmh >= k.min) c = k; return c; };
+
+async function loadPrecipLive() {
+  const base = { latitude: HK.lat, longitude: HK.lon, timezone: TZ, timeformat: 'unixtime' };
+  const [m15, hr] = await Promise.all([
+    fetchJSON('https://api.open-meteo.com/v1/forecast?' + qs({ ...base, models: 'icon_d2', minutely_15: 'precipitation,snowfall', forecast_minutely_15: 192, past_minutely_15: 8 })),
+    fetchJSON('https://api.open-meteo.com/v1/forecast?' + qs({ ...base, models: HIRES.map((m) => m.id).join(','), hourly: 'precipitation,snowfall', forecast_hours: 48, past_hours: 2 })),
+  ]);
+  const models = {};
+  for (const m of HIRES) {
+    const a = hr.hourly['precipitation_' + m.id];
+    if (a && a.some((v) => v != null)) models[m.id] = a;
+  }
+  return {
+    m15: { time: m15.minutely_15.time, p: m15.minutely_15.precipitation, snow: m15.minutely_15.snowfall },
+    hourly: { time: hr.hourly.time, models },
+  };
+}
+
+function demoPrecip() {
+  const now = Math.floor(Date.now() / 900000) * 900;
+  const time = [], p = [], snow = [];
+  for (let i = -8; i < 192; i++) {
+    const t = now + i * 900, h = i / 4;
+    time.push(t);
+    const v = Math.max(0, 0.9 * Math.exp(-(((h - 3) / 0.9) ** 2)) + 0.25 * Math.exp(-(((h - 5.5) / 1.4) ** 2)) + 0.4 * Math.exp(-(((h - 30) / 2) ** 2)) - 0.03);
+    p.push(+v.toFixed(2)); snow.push(0);
+  }
+  const ht = [], models = {};
+  const h0 = Math.floor(Date.now() / 3600000) * 3600;
+  for (let i = -2; i < 48; i++) ht.push(h0 + i * 3600);
+  HIRES.forEach((m, k) => {
+    models[m.id] = ht.map((t) => {
+      let s = 0; for (let q = 0; q < 4; q++) { const j = time.indexOf(t - q * 900); if (j >= 0) s += p[j]; }
+      return +Math.max(0, s * (0.7 + 0.15 * k) + (k - 1.5) * 0.1).toFixed(1);
+    });
+  });
+  return { m15: { time, p, snow }, hourly: { time: ht, models } };
+}
+
+function precipHeadline(P) {
+  const { time, p, snow } = P.m15;
+  const now = Date.now() / 1000;
+  const i0 = time.findIndex((t) => t > now);
+  if (i0 < 0) return 'Krátkodobá predpoveď zrážok nie je k dispozícii.';
+  const end12 = Math.min(time.length, i0 + 48);
+  const sum = (a, b) => p.slice(a, b).reduce((s, v) => s + (v || 0), 0);
+  const isSnow = (a, b) => snow.slice(a, b).some((v) => v > 0.05);
+  const kind = (a, b) => (isSnow(a, b) ? 'sneženie' : 'dážď');
+  const at = (i) => fmtTime.format((time[i] - 900) * 1000); // začiatok 15-min intervalu
+  // práve prší? (model alebo posledné meranie ČHMÚ)
+  const O = state.obs && !state.demo.local ? state.obs : null;
+  const lastObs = O ? O.precip.length - 1 : -1;
+  const obsWet = O && lastObs >= 0 && now - O.time[lastObs] < 2 * 3600 && (O.precip[lastObs] || 0) >= 0.1;
+  const wetNow = (p[i0] || 0) >= WET || ((p[i0 - 1] || 0) >= WET);
+  const obsTxt = obsWet ? ` ČHMÚ za poslednú hodinu nameralo ${r1(O.precip[lastObs])} mm.` : '';
+  if (wetNow || obsWet) {
+    let e = i0;
+    while (e < end12) {
+      if (p.slice(e, e + 4).every((v) => (v || 0) < WET)) break;
+      e++;
+    }
+    const k = cap(kind(i0, e));
+    if (e >= end12) return `<b>${k} pokračuje</b> aj ďalších 12 hodín, spolu asi ${r1(sum(i0, end12))} mm.${obsTxt}`;
+    if (e === i0) return `<b>Zrážky práve slabnú</b> a podľa ICON-D2 by mali do 15 minút ustať.${obsTxt}`;
+    return `<b>${k} skončí okolo ${at(e)}</b>. Do konca ešte asi ${r1(sum(i0, e))} mm.${obsTxt}`;
+  }
+  const s = p.findIndex((v, i) => i >= i0 && i < end12 && (v || 0) >= WET);
+  if (s >= 0) {
+    let e = s; while (e < time.length && !p.slice(e, e + 4).every((v) => (v || 0) < WET)) e++;
+    const peak = Math.max(...p.slice(s, e)) * 4;
+    const cls = rainClass(peak);
+    // zhoda modelov s vysokým rozlíšením v hodine začiatku
+    const hIdx = P.hourly.time.findIndex((t) => t >= time[s]);
+    const ids = Object.keys(P.hourly.models);
+    const agree = hIdx >= 0 ? ids.filter((id) => [0, 1].some((d) => (P.hourly.models[id][hIdx + d] || 0) >= 0.1)).length : 0;
+    const mins = Math.round((time[s] - 900 - now) / 60);
+    const when = mins < 60 ? `o ${Math.max(5, Math.round(mins / 5) * 5)} min (${at(s)})` : `okolo ${at(s)}`;
+    return `<b>${cap(kind(s, e))} začne ${when}</b>${cls ? `, ${cls.name}` : ''}, spolu asi ${r1(sum(s, e))} mm.
+      Zhoda modelov s vysokým rozlíšením: ${agree} zo ${ids.length}.`;
+  }
+  // nič v 12 h – ďalšie zrážky v 48 h podľa ICON-D2 / priemeru
+  const n = p.findIndex((v, i) => i >= end12 && (v || 0) >= WET);
+  return `<b>Najbližších 12 hodín bez zrážok.</b>${n >= 0 ? ` Ďalšie zrážky asi ${dayShort(time[n])} okolo ${at(n)}.` : ' Ani do 48 hodín sa podľa ICON-D2 zrážky nečakajú.'}`;
+}
+
+let precipChart = null;
+function renderPrecip() {
+  const el = $('#precip');
+  const P = state.precip;
+  if (!P) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="chart-head"><h3>Zrážky detailne</h3>
+      <div class="seg" role="group" aria-label="Rozsah" id="precip-range">
+        <button type="button" data-h="3" aria-pressed="${state.precipRange === 3}">3 h</button>
+        <button type="button" data-h="12" aria-pressed="${state.precipRange === 12}">12 h</button>
+        <button type="button" data-h="48" aria-pressed="${state.precipRange === 48}">48 h</button></div></div>
+    <p class="precip-head">${precipHeadline(P)}</p>
+    <div class="chart" id="ch-m15"><svg></svg><div class="tip" hidden></div></div>
+    <div class="precip-key">${RAIN_CLASSES.map((c) => `<span style="--c:${c.color}">${c.name}${c.min === 10 ? ' ≥ 10' : ''}</span>`).join('')}<span class="u">mm/h · po 15 min · ICON-D2 2 km</span></div>
+    <h3 class="sub-h">Po hodinách · modely s vysokým rozlíšením [mm]</h3>
+    <div class="pm-wrap">${precipMatrix(P)}</div>
+    <div class="skill-note">Hodnota pri hodine = úhrn za nasledujúcu hodinu (napr. 14 = 14:00–15:00). Načasovanie prehánok má neistotu asi ±1 h;
+      keď sa modely zhodujú, predpoveď je spoľahlivejšia.</div>`;
+  el.querySelectorAll('#precip-range button').forEach((b) => b.addEventListener('click', () => {
+    state.precipRange = +b.dataset.h;
+    try { localStorage.setItem('mp-precip-range', b.dataset.h); } catch { /* nevadí */ }
+    renderPrecip();
+  }));
+  drawPrecipChart();
+}
+
+function precipMatrix(P) {
+  const now = Date.now() / 1000;
+  const H = P.hourly;
+  // hodnota v čase T = úhrn za hodinu pred T → stĺpec označíme začiatkom hodiny
+  const cols = H.time.map((t, i) => ({ t, i })).filter((c) => c.t > now - 3600 + 1).slice(0, 24);
+  const cell = (v) => {
+    if (v == null) return '<td class="na">·</td>';
+    const c = rainClass(v);
+    return c ? `<td style="--c:${c.color}" data-c="${RAIN_CLASSES.indexOf(c)}">${r1(v)}</td>` : '<td class="dry">·</td>';
+  };
+  const head = `<tr><th></th>${cols.map((c) => `<th>${localHour(c.t - 3600)}</th>`).join('')}</tr>`;
+  const ids = HIRES.filter((m) => H.models[m.id]);
+  const rows = ids.map((m) => `<tr><th class="m">${m.name}<small>${m.res}</small></th>${cols.map((c) => cell(H.models[m.id][c.i])).join('')}</tr>`);
+  // pravdepodobnosť z ensemble (hodinové časy z hlavnej predpovede)
+  if (state.derived && state.local) {
+    const li = new Map(state.local.times.map((t, i) => [t, i]));
+    rows.push(`<tr class="prob"><th class="m">Pravdepodobnosť<small>ensemble ≥ 0,1 mm</small></th>${cols.map((c) => {
+      const i = li.get(c.t); const pr = i == null ? null : state.derived.pRain[i];
+      return pr == null ? '<td class="na">·</td>' : `<td style="--a:${(0.1 + 0.9 * pr).toFixed(2)}">${Math.round(pr * 100)}</td>`;
+    }).join('')}</tr>`);
+  }
+  // dni nad stĺpcami
+  const days = [];
+  cols.forEach((c) => { const d = dayShort(c.t - 3600); if (!days.length || days[days.length - 1].d !== d) days.push({ d, n: 1 }); else days[days.length - 1].n++; });
+  const dayRow = `<tr class="days"><th></th>${days.map((d) => `<th colspan="${d.n}">${d.n >= 3 ? d.d : ''}</th>`).join('')}</tr>`;
+  return `<table class="pm"><thead>${dayRow}${head}</thead><tbody>${rows.join('')}</tbody></table>`;
+}
+
+function drawPrecipChart() {
+  const P = state.precip; if (!P) return;
+  const el = $('#ch-m15'); if (!el) return;
+  const svg = d3.select(el).select('svg'), tip = el.querySelector('.tip');
+  const now = Date.now() / 1000;
+  const hours = state.precipRange;
+  const { time, p, snow } = P.m15;
+  const idx = time.map((t, i) => i).filter((i) => time[i] > now - 3600 && time[i] <= now + hours * 3600 + 1);
+  if (!idx.length) { svg.selectAll('*').remove(); return; }
+  const W = el.clientWidth || 300, H = 130, m = { l: 30, r: 6, t: 8, b: 20 };
+  const t0 = time[idx[0]] - 900, t1 = time[idx[idx.length - 1]];
+  const x = d3.scaleLinear().domain([t0, t1]).range([m.l, W - m.r]);
+  const maxR = Math.max(2, ...idx.map((i) => (p[i] || 0) * 4));
+  const y = d3.scaleLinear().domain([0, maxR]).nice().range([H - m.b, m.t]);
+  svg.attr('viewBox', `0 0 ${W} ${H}`).attr('height', H).selectAll('*').remove();
+  y.ticks(3).forEach((v) => {
+    svg.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(v)).attr('y2', y(v)).attr('stroke', '#ffffff10');
+    svg.append('text').attr('x', m.l - 5).attr('y', y(v) + 3).attr('text-anchor', 'end').text(String(v).replace('.', ','));
+  });
+  // osi času
+  const stepH = hours <= 3 ? 0.5 : hours <= 12 ? 2 : 6;
+  for (let t = Math.ceil(t0 / (stepH * 3600)) * stepH * 3600; t <= t1; t += stepH * 3600) {
+    svg.append('line').attr('x1', x(t)).attr('x2', x(t)).attr('y1', m.t).attr('y2', H - m.b).attr('stroke', '#ffffff0d');
+    svg.append('text').attr('x', x(t)).attr('y', H - 5).attr('text-anchor', 'middle').text(fmtTime.format(t * 1000));
+  }
+  const bw = Math.max(1, x(t0 + 900) - x(t0) - (hours <= 12 ? 2 : 0.5));
+  for (const i of idx) {
+    const r = (p[i] || 0) * 4, c = rainClass(r);
+    if (!c) continue;
+    svg.append('rect').attr('x', x(time[i] - 900) + (hours <= 12 ? 1 : 0.25)).attr('width', bw).attr('y', y(r)).attr('height', Math.max(1.5, y(0) - y(r)))
+      .attr('rx', Math.min(2, bw / 2)).attr('fill', c.color).attr('stroke', snow[i] > 0.02 ? '#ffffff' : 'none').attr('stroke-width', 0.8);
+  }
+  svg.append('line').attr('x1', x(now)).attr('x2', x(now)).attr('y1', m.t).attr('y2', H - m.b).attr('stroke', '#8fd3ff').attr('stroke-dasharray', '2 3');
+  svg.append('text').attr('x', x(now) + 4).attr('y', m.t + 9).text('teraz').style('fill', '#8fd3ff');
+  const cross = svg.append('rect').attr('y', m.t).attr('height', H - m.b - m.t).attr('width', bw).attr('fill', '#ffffff14').attr('opacity', 0);
+  svg.append('rect').attr('x', m.l).attr('y', 0).attr('width', W - m.l - m.r).attr('height', H).attr('fill', 'transparent')
+    .on('pointermove', (ev) => {
+      const [mx] = d3.pointer(ev);
+      const t = x.invert(mx);
+      const i = idx.reduce((b, k) => (Math.abs(time[k] - 450 - t) < Math.abs(time[b] - 450 - t) ? k : b), idx[0]);
+      const r = (p[i] || 0) * 4, c = rainClass(r);
+      cross.attr('x', x(time[i] - 900)).attr('opacity', 1);
+      tip.innerHTML = `<b>${fmtTime.format((time[i] - 900) * 1000)}–${fmtTime.format(time[i] * 1000)}</b><hr>
+        <div class="r"><span>Úhrn</span><span>${r1(p[i])} mm</span></div><div class="r"><span>Intenzita</span><span>${r1(r)} mm/h</span></div>
+        <div class="r"><span>Typ</span><span>${c ? (snow[i] > 0.02 ? 'sneženie, ' : '') + c.name : 'bez zrážok'}</span></div>`;
+      tip.hidden = false;
+      const tw = tip.offsetWidth;
+      tip.style.left = (mx + 12 + tw > W ? mx - tw - 12 : mx + 12) + 'px'; tip.style.top = '6px';
+    })
+    .on('pointerleave', () => { cross.attr('opacity', 0); tip.hidden = true; });
+}
+
 /* ------------------------------------------------------------------ stav, ovládanie */
 function setStatus() {
   const st = $('#status');
@@ -1048,8 +1255,14 @@ async function load(force = false) {
     cacheSet('mp-grid-v1', { ...d, P: d.P.map((a) => Array.from(a, (v) => Math.round(v * 10) / 10)), G: d.G.map((a) => Array.from(a, Math.round)), R: d.R.map((a) => Array.from(a, (v) => Math.round(v * 10) / 10)), C: d.C.map((a) => Array.from(a, Math.round)) });
     return d;
   };
+  const getPrecip = async () => {
+    const c = !force && cacheGet('mp-precip-v1', 10);
+    if (c) return c;
+    const d = await loadPrecipLive(); cacheSet('mp-precip-v1', d); return d;
+  };
   const own = (f) => fetchJSON(`data/${f}?v=${Math.floor(Date.now() / 600000)}`, 15000);
-  const [lr, gr, sk, ob] = await Promise.allSettled([getLocal(), getGrid(), own('skill.json'), own('obs-recent.json')]);
+  const [lr, gr, sk, ob, pr] = await Promise.allSettled([getLocal(), getGrid(), own('skill.json'), own('obs-recent.json'), getPrecip()]);
+  if (pr.status !== 'fulfilled') console.warn('Zrážky detailne – živé dáta zlyhali:', pr.reason);
   state.skill = sk.status === 'fulfilled' ? sk.value : null;
   state.obs = ob.status === 'fulfilled' ? ob.value : null;
   state.demo.local = lr.status !== 'fulfilled';
@@ -1057,12 +1270,13 @@ async function load(force = false) {
   if (lr.status !== 'fulfilled') console.warn('Plotiště – živé dáta zlyhali:', lr.reason);
   if (gr.status !== 'fulfilled') console.warn('Európa – živé dáta zlyhali:', gr.reason);
   state.local = lr.status === 'fulfilled' ? lr.value : demoLocal();
+  state.precip = pr.status === 'fulfilled' ? pr.value : (state.demo.local ? demoPrecip() : null);
   state.grid = gr.status === 'fulfilled' ? gr.value : demoGrid();
   state.derived = deriveLocal(state.local);
   state.tracks = buildTracks(state.grid);
   state.step = Math.min(state.step, state.grid.times.length - 1);
 
-  renderNow(); renderSummary(); renderRisk(); renderSkill();
+  renderNow(); renderPrecip(); renderSummary(); renderRisk(); renderSkill();
   if (!charts.length) setupCharts();
   drawCharts();
   renderLegend(); renderTimeline(); renderSystems();
@@ -1085,7 +1299,7 @@ function toggleMax(which) {
   const w = $('#windows');
   if (w.dataset.max === which || !which) delete w.dataset.max; else w.dataset.max = which;
   document.querySelectorAll('.max-btn').forEach((b) => b.setAttribute('aria-pressed', w.dataset.max === b.dataset.max));
-  requestAnimationFrame(() => { mapResize(); drawCharts(); });
+  requestAnimationFrame(() => { mapResize(); drawCharts(); drawPrecipChart(); });
 }
 
 function init() {
@@ -1111,7 +1325,7 @@ function init() {
   });
 
   let rt = null;
-  new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { mapResize(); drawCharts(); }, 120); }).observe(document.body);
+  new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { mapResize(); drawCharts(); drawPrecipChart(); }, 120); }).observe(document.body);
 
   load();
   setInterval(() => load(), 30 * 60000); // automatická obnova každých 30 min
