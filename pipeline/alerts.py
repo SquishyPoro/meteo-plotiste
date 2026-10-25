@@ -334,6 +334,54 @@ def chmi_warnings():
 LEVEL_SK = {'yellow': 'Žltá', 'orange': 'Oranžová', 'red': 'Červená'}
 
 
+# ------------------------------------------------------------------ rieky (hydrologické dáta ČHMÚ)
+
+HYDRO = 'https://opendata.chmi.cz/hydrology/now/'
+RIVERS = ['0-203-1-016000', '0-203-1-042000', '0-203-1-037000', '0-203-1-023000']  # Labe Jaroměř, Labe Němčice, Orlice Týniště, Trotina Sendražice
+RIVERS_PATH = os.path.join(ROOT, 'data', 'rivers.json')
+SPA_SK = {1: '1. SPA – bdelosť', 2: '2. SPA – pohotovosť', 3: '3. SPA – ohrozenie', 4: 'extrémna povodeň'}
+
+
+def rivers():
+    meta = json.loads(get(HYDRO + 'metadata/meta1.json', raw=True))['data']['data']
+    hdr = meta['header'].split(',')
+    info = {v[0]: dict(zip(hdr, v)) for v in meta['values'] if v[0] in RIVERS}
+    out = []
+    for sid in RIVERS:
+        m = info.get(sid)
+        if not m:
+            continue
+        j = json.loads(get(HYDRO + f'data/{sid}.json', raw=True))
+        ts = {t['tsConID']: t['tsData'] for o in j['objList'] for t in o['tsList']}
+        def series(k, step=6):  # každá 6. hodnota = hodinový krok (dáta sú po 10 min)
+            d = ts.get(k) or []
+            pick = d[::step] + ([d[-1]] if d and (len(d) - 1) % step else [])
+            return [[int(dt.datetime.fromisoformat(x['dt'].replace('Z', '+00:00')).timestamp()), x['value']] for x in pick if x['value'] is not None]
+        last = lambda k: (ts.get(k) or [{}])[-1].get('value')
+        main_k = 'H' if m['SPA_TYP'] == 'H' else 'Q'
+        thr = [m['SPA1' + main_k], m['SPA2' + main_k], m['SPA3' + main_k], m['SPA4' + main_k]]
+        val = last(main_k)
+        level = 0
+        for i, th in enumerate(thr[:3]):
+            if th is not None and val is not None and val >= th:
+                level = i + 1
+        fc = series(main_k + '_F', 1)
+        fc_level, fc_when = 0, None
+        for t, v in fc:
+            for i, th in enumerate(thr[:3]):
+                if th is not None and v >= th and i + 1 > fc_level:
+                    fc_level, fc_when = i + 1, t
+        dry = m['DRY' + main_k]
+        out.append({'id': sid, 'name': m['STATION_NAME'], 'stream': m['STREAM_NAME'], 'kind': main_k,
+                    'unit': 'cm' if main_k == 'H' else 'm³/s', 'spa': thr, 'dry': dry,
+                    'h': last('H'), 'q': last('Q'), 'th': last('TH'),
+                    't': int(dt.datetime.fromisoformat((ts.get(main_k) or [{'dt': '1970-01-01T00:00:00Z'}])[-1]['dt'].replace('Z', '+00:00')).timestamp()),
+                    'level': level, 'below_dry': dry is not None and val is not None and val < dry,
+                    'fc_level': fc_level, 'fc_when': fc_when,
+                    'series': series(main_k), 'fc': fc})
+    return out
+
+
 # ------------------------------------------------------------------ týždenný report
 
 MODEL_SK = {'ecmwf_ifs025': 'ECMWF', 'icon_seamless': 'DWD ICON', 'gfs_seamless': 'NOAA GFS', 'meteofrance_seamless': 'Météo-France',
@@ -552,6 +600,29 @@ def main():
                 sent[key] = now + 6 * 86400  # podržať v stave dlhšie, výstrahy trvajú aj niekoľko dní
     except Exception as e:
         log('výstrahy ČHMÚ zlyhali:', e)
+
+    # --- rieky: dashboard (najviac raz za hodinu, pri zmene stupňa hneď) a notifikácie pri povodňovej aktivite
+    try:
+        rv = rivers()
+        sig = [[r['id'], r['level'], r['fc_level']] for r in rv]
+        if now - state.get('rivers_at', 0) > 55 * 60 or state.get('rivers_sig') != sig:
+            with open(RIVERS_PATH, 'w') as f:
+                json.dump({'updated': int(now), 'stations': rv}, f, ensure_ascii=False, separators=(',', ':'))
+            state['rivers_at'], state['rivers_sig'] = now, sig
+        for r in rv:
+            log(f'{r["stream"]} {r["name"]}: {r["h"]} cm, {r["q"]} m³/s, stupeň {r["level"]}, predpoveď {r["fc_level"]}')
+            if r['level'] >= 1 and once(f'spa-{r["id"]}-{r["level"]}', 24):
+                send(topic, f'{r["stream"]}: {SPA_SK[r["level"]]}', f'{r["stream"]} v stanici {r["name"]}: {r["h"]} cm ({fmt(r["q"], 1)} m³/s). '
+                     'Sleduj vývoj a výstrahy ČHMÚ.', 'ocean,warning', 3 + r['level'] if r['level'] < 3 else 5, dry)
+                mark(f'spa-{r["id"]}-{r["level"]}')
+            elif r['fc_level'] > r['level'] and once(f'spa-fc-{r["id"]}-{r["fc_level"]}', 24):
+                wd = dt.datetime.fromtimestamp(r['fc_when'], TZ)
+                when = f'{DAY_SK[wd.weekday()]} {wd:%H:%M}'
+                send(topic, f'{r["stream"]}: predpoveď {SPA_SK[r["fc_level"]]}', f'Podľa predpovede ČHMÚ dosiahne {r["stream"]} v stanici {r["name"]} '
+                     f'{SPA_SK[r["fc_level"]]} okolo {when}.', 'ocean', 4, dry)
+                mark(f'spa-fc-{r["id"]}-{r["fc_level"]}')
+    except Exception as e:
+        log('rieky zlyhali:', e)
 
     # upratať staré záznamy
     for k in [k for k, t in sent.items() if now - t > 7 * 86400]:

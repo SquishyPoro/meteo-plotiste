@@ -2169,6 +2169,58 @@ function renderWeek() {
   el.innerHTML = cards;
 }
 
+/* ------------------------------------------------------------------ RIEKY (data/rivers.json z hydrologických dát ČHMÚ) */
+const SPA_NAME = [tx('normálny stav', 'normální stav'), tx('1. SPA · bdelosť', '1. SPA · bdělost'), tx('2. SPA · pohotovosť', '2. SPA · pohotovost'), tx('3. SPA · ohrozenie', '3. SPA · ohrožení')];
+const SPA_LVL = ['ok', 'warn', 'serious', 'crit'];
+
+async function refreshRivers() {
+  try { state.rivers = await fetchJSON(`data/rivers.json?v=${Math.floor(Date.now() / 300000)}`, 15000); } catch { state.rivers = null; }
+  renderRivers();
+}
+
+function riverSpark(r) {
+  const pts = [...r.series.map(([t, v]) => [t, v, 0]), ...r.fc.filter(([t]) => t > (r.series.at(-1) || [0])[0]).map(([t, v]) => [t, v, 1])];
+  if (pts.length < 2) return '';
+  const W = 150, H = 38;
+  const thr = r.kind === 'H' ? r.spa.slice(0, 3).filter((x) => x != null) : [];
+  const vals = pts.map((p) => p[1]);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const near = thr.filter((x) => x <= hi * 1.6); // prah ukáž, len ak je na dohľad
+  hi = Math.max(hi, ...near); lo = Math.min(lo, hi - 1);
+  const t0 = pts[0][0], t1 = pts.at(-1)[0];
+  const x = (t) => 2 + ((t - t0) / (t1 - t0 || 1)) * (W - 4), y = (v) => H - 3 - ((v - lo) / (hi - lo || 1)) * (H - 6);
+  const path = (sel) => pts.filter(sel).map((p, i) => `${i ? 'L' : 'M'}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join('');
+  const nowX = x(r.t);
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="spark" aria-hidden="true">
+    ${near.map((th, i) => `<line x1="0" x2="${W}" y1="${y(th)}" y2="${y(th)}" stroke="${['#e8c547', '#ff8a3d', '#ff4d5e'][i]}" stroke-dasharray="3 3" opacity=".7"/>`).join('')}
+    <line x1="${nowX}" x2="${nowX}" y1="0" y2="${H}" stroke="#ffffff22"/>
+    <path d="${path((p) => !p[2])}" fill="none" stroke="#5fc0f0" stroke-width="1.6"/>
+    <path d="${path((p, i, a) => p[2] || (a[i + 1] && a[i + 1][2]))}" fill="none" stroke="#5fc0f0" stroke-width="1.4" stroke-dasharray="3 2" opacity=".75"/></svg>`;
+}
+
+function renderRivers() {
+  const el = $('#rivers');
+  const R = state.rivers;
+  if (!R || !R.stations || !R.stations.length) { el.hidden = true; return; }
+  el.hidden = false;
+  const rows = R.stations.map((r) => {
+    const val = r.kind === 'H' ? r.h : r.q;
+    const prev = r.series.length > 3 ? r.series.at(-4)[1] : null; // ~3 h dozadu
+    const tr = prev == null || val == null ? '' : val - prev > (r.kind === 'H' ? 2 : 0.3) ? '↗' : val - prev < -(r.kind === 'H' ? 2 : 0.3) ? '↘' : '→';
+    const lvl = r.level || 0;
+    const status = lvl ? SPA_NAME[lvl] : r.below_dry ? tx('nízky stav (sucho)', 'nízký stav (sucho)') : SPA_NAME[0];
+    const fc = r.fc_level > lvl ? `<div class="rv-fc">${tx('predpoveď', 'předpověď')}: <b>${SPA_NAME[r.fc_level]}</b> ${dayShort(r.fc_when)} ${fmtTime.format(r.fc_when * 1000)}</div>` : '';
+    return `<div class="rv" data-level="${SPA_LVL[lvl]}">
+      <div class="rv-n"><b>${r.stream}</b><span>${r.name}</span></div>
+      <div class="rv-v"><b>${r.h != null ? r0(r.h) + ' cm' : '–'}</b><span>${r.q != null ? r1(r.q) + ' m³/s' : ''} ${tr}</span>${r.th != null ? `<span>${tx('voda', 'voda')} ${r1(r.th)} °C</span>` : ''}</div>
+      ${riverSpark(r)}
+      <div class="rv-s"><span class="chip" data-level="${lvl ? SPA_LVL[lvl] : r.below_dry ? 'warn' : 'ok'}">${status.toUpperCase()}</span>${fc}</div></div>`;
+  }).join('');
+  el.innerHTML = `<h3>${tx('Rieky · ČHMÚ', 'Řeky · ČHMÚ')}</h3>${rows}
+    <div class="skill-note">${tx('Plná čiara = posledných ~20 h, prerušovaná = predpoveď ČHMÚ. Farebné čiary = hranice stupňov povodňovej aktivity (SPA).', 'Plná čára = posledních ~20 h, přerušovaná = předpověď ČHMÚ. Barevné čáry = hranice stupňů povodňové aktivity (SPA).')}
+      ${tx('Aktualizované', 'Aktualizováno')} ${fmtTime.format(R.updated * 1000)}.</div>`;
+}
+
 /* ------------------------------------------------------------------ VÝSTRAHY ČHMÚ (data/warnings.json z GitHub Actions) */
 const WARN_LEVEL = { yellow: tx('Žltá výstraha', 'Žlutá výstraha'), orange: tx('Oranžová výstraha', 'Oranžová výstraha'), red: tx('Červená výstraha', 'Červená výstraha') };
 const fmtWarnTime = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -2346,7 +2398,9 @@ function init() {
   refreshRadar();
   setInterval(refreshRadar, 5 * 60000);
   refreshWarnings();
-  setInterval(refreshWarnings, 5 * 60000);  // nová radarová snímka každých 10 min
+  setInterval(refreshWarnings, 5 * 60000);
+  refreshRivers();
+  setInterval(refreshRivers, 10 * 60000);  // nová radarová snímka každých 10 min
 }
 
 init();

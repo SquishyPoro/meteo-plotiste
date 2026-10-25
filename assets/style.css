@@ -345,6 +345,24 @@ table.pm tr.prob td.na { background: #0f1a2b; color: var(--dim); }
 .radar-note { margin-top: 5px; font: 10.5px var(--mono); color: var(--dim); }
 .map-legend .keys.rk span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
 
+/* rieky */
+.rivers { border: 1px solid var(--line); border-radius: 3px; padding: 10px 12px; background: #0b1424; display: grid; gap: 8px; }
+.rivers h3 { margin: 0; }
+.rv { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) 150px; grid-template-areas: "n v s" "st st st"; gap: 2px 10px; align-items: center;
+  padding: 6px 0 6px 9px; border-left: 3px solid var(--ok); }
+.rv[data-level="warn"] { border-left-color: var(--warn); }
+.rv[data-level="serious"] { border-left-color: var(--serious); }
+.rv[data-level="crit"] { border-left-color: var(--crit); }
+.rv-n { grid-area: n; display: grid; min-width: 0; }
+.rv-n b { font-weight: 600; }
+.rv-n span, .rv-v span { color: var(--muted); font: 11px var(--mono); }
+.rv-v { grid-area: v; display: grid; font-variant-numeric: tabular-nums; }
+.rv-v b { font: 500 15px var(--mono); }
+.rv .spark { grid-area: s; max-width: 100%; }
+.rv-s { grid-area: st; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.rv-fc { font: 11px var(--mono); color: var(--warn); }
+@media (max-width: 480px) { .rv { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "n v" "s s" "st st"; } }
+
 /* zimný balík */
 .winter { border: 1px solid var(--line); border-radius: 3px; padding: 10px 12px; background: #0b1424; display: grid; gap: 6px; }
 .winter h3 { margin: 0 0 2px; }
