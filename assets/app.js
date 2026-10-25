@@ -22,15 +22,19 @@ const STEP_H = 3, MAX_STEPS = 41; // 0 … 120 h
 const DAYS = 7;
 
 const $ = (s) => document.querySelector(s);
+// jazyk stránky: slovenčina (predvolená) alebo čeština; tx('slovensky', 'česky')
+const LANG = (() => { try { return localStorage.getItem('mp-lang') === 'cs' ? 'cs' : 'sk'; } catch { return 'sk'; } })();
+const tx = (sk, cs) => (LANG === 'cs' ? cs : sk);
+const LOCALE = tx('sk-SK', 'cs-CZ');
 const state = { local: null, grid: null, tracks: [], layer: 'wind', step: 0, demo: { local: false, grid: false }, skill: null, obs: null, precip: null, precipRange: 12, radar: null, rstep: 0, radarError: false };
 try { const r = +localStorage.getItem('mp-precip-range'); if ([3, 12, 48].includes(r)) state.precipRange = r; } catch { /* nevadí */ }
 const OBS_COLOR = '#f2c46d';
 const AI_COLOR = '#8fd3ff';
 
 /* ------------------------------------------------------------------ pomocné */
-const fmtTime = new Intl.DateTimeFormat('sk-SK', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
-const fmtDay = new Intl.DateTimeFormat('sk-SK', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'numeric' });
-const fmtDayShort = new Intl.DateTimeFormat('sk-SK', { timeZone: TZ, weekday: 'short', day: 'numeric' });
+const fmtTime = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
+const fmtDay = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'numeric' });
+const fmtDayShort = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, weekday: 'short', day: 'numeric' });
 const fmtDate = new Intl.DateTimeFormat('sk-SK', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
 const fmtHour = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hourCycle: 'h23' });
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -55,7 +59,8 @@ function bearing(lat1, lon1, lat2, lon2) {
   const x = Math.cos(lat1 * d) * Math.sin(lat2 * d) - Math.sin(lat1 * d) * Math.cos(lat2 * d) * Math.cos((lon2 - lon1) * d);
   return (Math.atan2(y, x) / d + 360) % 360;
 }
-const DIR_ADV = ['severne', 'severovýchodne', 'východne', 'juhovýchodne', 'južne', 'juhozápadne', 'západne', 'severozápadne'];
+const DIR_ADV = tx(['severne', 'severovýchodne', 'východne', 'juhovýchodne', 'južne', 'juhozápadne', 'západne', 'severozápadne'],
+  ['severně', 'severovýchodně', 'východně', 'jihovýchodně', 'jižně', 'jihozápadně', 'západně', 'severozápadně']);
 const DIR_SHORT = ['S', 'SV', 'V', 'JV', 'J', 'JZ', 'Z', 'SZ'];
 const dirIdx = (deg) => Math.round(deg / 45) % 8;
 
@@ -70,7 +75,14 @@ function mean(arr) {
   return n ? s / n : null;
 }
 
-const WMO = {
+const WMO = LANG === 'cs' ? {
+  0: 'Jasno', 1: 'Převážně jasno', 2: 'Polojasno', 3: 'Zataženo', 45: 'Mlha', 48: 'Mlha s námrazou',
+  51: 'Slabé mrholení', 53: 'Mrholení', 55: 'Husté mrholení', 56: 'Mrznoucí mrholení', 57: 'Mrznoucí mrholení',
+  61: 'Slabý déšť', 63: 'Déšť', 65: 'Silný déšť', 66: 'Mrznoucí déšť', 67: 'Mrznoucí déšť',
+  71: 'Slabé sněžení', 73: 'Sněžení', 75: 'Silné sněžení', 77: 'Sněhová zrna',
+  80: 'Přeháňky', 81: 'Přeháňky', 82: 'Silné přeháňky', 85: 'Sněhové přeháňky', 86: 'Sněhové přeháňky',
+  95: 'Bouřka', 96: 'Bouřka s kroupami', 99: 'Bouřka s kroupami',
+} : {
   0: 'Jasno', 1: 'Prevažne jasno', 2: 'Polojasno', 3: 'Zamračené', 45: 'Hmla', 48: 'Hmla s námrazou',
   51: 'Slabé mrholenie', 53: 'Mrholenie', 55: 'Husté mrholenie', 56: 'Mrznúce mrholenie', 57: 'Mrznúce mrholenie',
   61: 'Slabý dážď', 63: 'Dážď', 65: 'Silný dážď', 66: 'Mrznúci dážď', 67: 'Mrznúci dážď',
@@ -376,16 +388,16 @@ function aiSeries(L, S, key) {
 
 /* ------------------------------------------------------------------ odvodené výpočty: tlakové níže */
 const REGIONS = [
-  [-40, -10, 62, 80, 'pri Islande'], [-40, -10, 28, 62, 'nad Atlantikom'],
-  [-10, 2, 49, 60, 'nad Britskými ostrovmi'], [2, 9, 51, 62, 'nad Severným morom'],
-  [5, 35, 58, 75, 'nad Škandináviou'], [10, 30, 53, 58, 'nad Baltským morom'],
-  [-10, 3.5, 35, 44, 'nad Pyrenejským polostrovom'], [-5, 7, 43, 51, 'nad Francúzskom'],
-  [5, 16, 45, 47.5, 'nad Alpami'], [12, 19, 48.5, 51.2, 'nad Českom'], [6, 15, 47.5, 55, 'nad Nemeckom'],
-  [14, 24.5, 49, 55, 'nad Poľskom'], [16, 23, 45.5, 49, 'nad Panónskou nížinou'],
-  [13, 28, 39, 46, 'nad Balkánom'], [27, 42, 40.5, 47, 'nad Čiernym morom'],
-  [-6, 37, 28, 45.5, 'nad Stredomorím'], [30, 60, 60, 80, 'nad severným Ruskom'],
+  [-40, -10, 62, 80, tx('pri Islande', 'u Islandu')], [-40, -10, 28, 62, tx('nad Atlantikom', 'nad Atlantikem')],
+  [-10, 2, 49, 60, tx('nad Britskými ostrovmi', 'nad Britskými ostrovy')], [2, 9, 51, 62, tx('nad Severným morom', 'nad Severním mořem')],
+  [5, 35, 58, 75, tx('nad Škandináviou', 'nad Skandinávií')], [10, 30, 53, 58, tx('nad Baltským morom', 'nad Baltským mořem')],
+  [-10, 3.5, 35, 44, tx('nad Pyrenejským polostrovom', 'nad Pyrenejským poloostrovem')], [-5, 7, 43, 51, tx('nad Francúzskom', 'nad Francií')],
+  [5, 16, 45, 47.5, tx('nad Alpami', 'nad Alpami')], [12, 19, 48.5, 51.2, tx('nad Českom', 'nad Českem')], [6, 15, 47.5, 55, tx('nad Nemeckom', 'nad Německem')],
+  [14, 24.5, 49, 55, tx('nad Poľskom', 'nad Polskem')], [16, 23, 45.5, 49, tx('nad Panónskou nížinou', 'nad Panonskou nížinou')],
+  [13, 28, 39, 46, tx('nad Balkánom', 'nad Balkánem')], [27, 42, 40.5, 47, tx('nad Čiernym morom', 'nad Černým mořem')],
+  [-6, 37, 28, 45.5, tx('nad Stredomorím', 'nad Středomořím')], [30, 60, 60, 80, tx('nad severným Ruskom', 'nad severním Ruskem')],
 ];
-const regionName = (lon, lat) => (REGIONS.find(([w, e, s, n]) => lon >= w && lon < e && lat >= s && lat < n) || [, , , , 'nad východnou Európou'])[4];
+const regionName = (lon, lat) => (REGIONS.find(([w, e, s, n]) => lon >= w && lon < e && lat >= s && lat < n) || [, , , , tx('nad východnou Európou', 'nad východní Evropou')])[4];
 
 function findExtrema(p, kind) {
   const out = [];
@@ -487,10 +499,10 @@ const map = {
 };
 
 const LAYERS = {
-  wind: { name: 'Nárazy vetra', unit: 'km/h', key: 'G', min: 30, max: 130, stops: ['#0a2a44', '#1b6fa8', '#5fc0f0', '#dff4ff'], ticks: [30, 60, 90, 130] },
-  rain: { name: 'Zrážky za 3 h', unit: 'mm', key: 'R', min: 0.2, max: 12, stops: ['#1a1f5c', '#3b4fd1', '#8f9cff', '#eef0ff'], ticks: [0.2, 3, 6, 12], log: true },
-  cape: { name: 'Búrkový potenciál (CAPE)', unit: 'J/kg', key: 'C', min: 150, max: 2000, stops: ['#3a1048', '#8a2bb0', '#d77dff', '#fbe9ff'], ticks: [150, 500, 1000, 2000] },
-  none: { name: 'Len tlak (izobary po 4 hPa)', unit: 'hPa' },
+  wind: { name: tx('Nárazy vetra', 'Nárazy větru'), unit: 'km/h', key: 'G', min: 30, max: 130, stops: ['#0a2a44', '#1b6fa8', '#5fc0f0', '#dff4ff'], ticks: [30, 60, 90, 130] },
+  rain: { name: tx('Zrážky za 3 h', 'Srážky za 3 h'), unit: 'mm', key: 'R', min: 0.2, max: 12, stops: ['#1a1f5c', '#3b4fd1', '#8f9cff', '#eef0ff'], ticks: [0.2, 3, 6, 12], log: true },
+  cape: { name: tx('Búrkový potenciál (CAPE)', 'Bouřkový potenciál (CAPE)'), unit: 'J/kg', key: 'C', min: 150, max: 2000, stops: ['#3a1048', '#8a2bb0', '#d77dff', '#fbe9ff'], ticks: [150, 500, 1000, 2000] },
+  none: { name: tx('Len tlak (izobary po 4 hPa)', 'Jen tlak (izobary po 4 hPa)'), unit: 'hPa' },
 };
 
 function buildLut(L) {
@@ -692,13 +704,15 @@ function drawMap() {
 function renderLegend() {
   const el = $('#map-legend');
   if (state.layer === 'radar') {
-    el.innerHTML = `<div class="lt">Radar · intenzita [mm/h]</div><div class="keys rk">${RAIN_CLASSES.map((c) => `<span style="--c:${c.color}">${c.name} ≥ ${String(c.min).replace('.', ',')}</span>`).join('')}
-      <span style="--c:${R_STORM}">búrka, krúpy ≥ 50 dBZ</span></div><div class="keys"><span>šípka = pohyb zrážok za 60 min</span></div>`;
+    el.innerHTML = `<div class="lt">${tx('Radar · intenzita [mm/h]', 'Radar · intenzita [mm/h]')}</div><div class="keys rk">${RAIN_CLASSES.map((c) => `<span style="--c:${c.color}">${c.name} ≥ ${String(c.min).replace('.', ',')}</span>`).join('')}
+      <span style="--c:${R_STORM}">${tx('búrka, krúpy', 'bouřka, kroupy')} ≥ 50 dBZ</span></div><div class="keys"><span>${tx('šípka = pohyb zrážok za 60 min', 'šipka = pohyb srážek za 60 min')}</span></div>`;
     return;
   }
   const L = LAYERS[state.layer];
-  const keys = `<div class="keys"><span><b>N</b> tlaková níž · <b>V</b> tlaková výš (hPa)</span>
-    <span>— — dráha níže, bodka = 24 h</span><span>čiary = izobary po 4 hPa</span></div>`;
+  const keys = tx(`<div class="keys"><span><b>N</b> tlaková níž · <b>V</b> tlaková výš (hPa)</span>
+    <span>— — dráha níže, bodka = 24 h</span><span>čiary = izobary po 4 hPa</span></div>`,
+  `<div class="keys"><span><b>N</b> tlaková níže · <b>V</b> tlaková výše (hPa)</span>
+    <span>— — dráha níže, tečka = 24 h</span><span>čáry = izobary po 4 hPa</span></div>`);
   if (!L.key) { el.innerHTML = `<div class="lt">${L.name}</div>${keys}`; return; }
   const grad = L.stops.join(',');
   el.innerHTML = `<div class="lt">${L.name} [${L.unit}]</div>
@@ -714,7 +728,7 @@ function renderTimeline() {
     inp.max = seq.length - 1; inp.value = state.rstep;
     const fr = seq[state.rstep], last = state.radar.frames[state.radar.frames.length - 1];
     const m = Math.round((fr.time - last.time) / 60);
-    $('#tl-label').innerHTML = `${fmtTime.format(fr.time * 1000)} <span>${m > 0 ? '+' + m + ' min · odhad' : m < 0 ? m + ' min' : 'posledná snímka'}</span>`;
+    $('#tl-label').innerHTML = `${fmtTime.format(fr.time * 1000)} <span>${m > 0 ? '+' + m + tx(' min · odhad', ' min · odhad') : m < 0 ? m + ' min' : tx('posledná snímka', 'poslední snímek')}</span>`;
     return;
   }
   const G = state.grid; if (!G) return;
@@ -734,30 +748,30 @@ function mapReadout(ev) {
   const s = state.step, G = state.grid;
   const p = sampleGrid(G.P[s], gx, gy);
   const el = $('#map-readout');
-  if (p == null) { el.innerHTML = 'Mimo dátovej mriežky'; return; }
+  if (p == null) { el.innerHTML = tx('Mimo dátovej mriežky', 'Mimo datové mřížky'); return; }
   const d = haversine(HK.lat, HK.lon, ll[1], ll[0]);
-  el.innerHTML = `${ll[1].toFixed(1)}° S ${ll[0].toFixed(1)}° V · <b>${r0(d)} km</b> od Plotišťa<br>
+  el.innerHTML = `${ll[1].toFixed(1)}° S ${ll[0].toFixed(1)}° V · <b>${r0(d)} km</b> ${tx('od Plotišťa', 'od Plotiště')}<br>
     tlak <b>${r0(p)} hPa</b> · nárazy <b>${r0(sampleGrid(G.G[s], gx, gy))} km/h</b><br>
-    zrážky <b>${r1(sampleGrid(G.R[s], gx, gy))} mm/3h</b> · CAPE <b>${r0(sampleGrid(G.C[s], gx, gy))} J/kg</b>`;
+    ${tx('zrážky', 'srážky')} <b>${r1(sampleGrid(G.R[s], gx, gy))} mm/3h</b> · CAPE <b>${r0(sampleGrid(G.C[s], gx, gy))} J/kg</b>`;
 }
 
 function renderSystems() {
   if (state.layer === 'radar') { renderRadarPanel(); return; }
-  $('.systems h3').textContent = 'Sledované tlakové níže a ich dosah na Plotiště';
+  $('.systems h3').textContent = tx('Sledované tlakové níže a ich dosah na Plotiště', 'Sledované tlakové níže a jejich dosah na Plotiště');
   const el = $('#sys-list');
   const D = state.derived;
-  if (!state.tracks.length) { el.innerHTML = '<span class="empty">Žiadna výrazná tlaková níž (pod 1004 hPa) v najbližších 5 dňoch.</span>'; return; }
+  if (!state.tracks.length) { el.innerHTML = `<span class="empty">${tx('Žiadna výrazná tlaková níž (pod 1004 hPa) v najbližších 5 dňoch.', 'Žádná výrazná tlaková níže (pod 1004 hPa) v nejbližších 5 dnech.')}</span>`; return; }
   el.innerHTML = state.tracks.map((t) => {
     const imp = trackImpact(t, D);
     const lvl = imp ? levelOf(Math.max(imp.gust60, imp.rain10, imp.storm ?? 0)) : 'none';
     const dir = DIR_ADV[dirIdx(bearing(HK.lat, HK.lon, t.nearAt.lat, t.nearAt.lon))];
     const now = t.pts.find((p) => p.s === state.step) || t.pts[0];
     const impTxt = imp
-      ? `vietor ≥60: <b>${pct(imp.gust60)}</b> · dážď ≥10 mm: <b>${pct(imp.rain10)}</b>`
-      : 'mimo dosahu Plotišťa';
+      ? `${tx('vietor', 'vítr')} ≥60: <b>${pct(imp.gust60)}</b> · ${tx('dážď', 'déšť')} ≥10 mm: <b>${pct(imp.rain10)}</b>`
+      : tx('mimo dosahu Plotišťa', 'mimo dosah Plotiště');
     return `<button class="sys" type="button" data-label="${t.label}" data-level="${lvl}" data-step="${t.nearAt.s}">
       <div class="t"><span><em>${t.label}</em> · min. ${r0(t.minP)} hPa</span><span>${r0(t.gmax)} km/h</span></div>
-      <div class="d">teraz ${regionName(now.lon, now.lat)}; najbližšie ${r0(t.near)} km ${dir} — ${dayShort(t.nearAt.t)} ${fmtTime.format(t.nearAt.t * 1000)}</div>
+      <div class="d">${tx('teraz', 'nyní')} ${regionName(now.lon, now.lat)}; ${tx('najbližšie', 'nejblíže')} ${r0(t.near)} km ${dir} — ${dayShort(t.nearAt.t)} ${fmtTime.format(t.nearAt.t * 1000)}</div>
       <div class="p">${impTxt}</div></button>`;
   }).join('');
 }
@@ -767,17 +781,17 @@ function renderNow() {
   const L = state.local, c = L.current;
   const desc = WMO[c.weather_code] || '—';
   $('#now').innerHTML = `<div class="temp">${r1(c.temperature_2m)}<sup>°C</sup></div>
-    <div><div class="desc">${desc}</div><div class="feel">pocitovo ${r1(c.apparent_temperature)} °C · model ${fmtTime.format(c.time * 1000)}</div>${obsLine()}</div>`;
+    <div><div class="desc">${desc}</div><div class="feel">${tx('pocitovo', 'pocitově')} ${r1(c.apparent_temperature)} °C · model ${fmtTime.format(c.time * 1000)}</div>${obsLine()}</div>`;
   const dir = c.wind_direction_10m;
   const trend = c.pressure_trend;
   const trendTxt = trend == null ? '' : (trend > 0.5 ? '↗' : trend < -0.5 ? '↘' : '→') + ' ' + (trend > 0 ? '+' : '') + r1(trend);
   $('#now-kv').innerHTML = `
-    <div><dt>Vietor</dt><dd><span class="arrow" style="transform:rotate(${dir + 180}deg)">↑</span> ${r0(c.wind_speed_10m)}<small>km/h ${DIR_SHORT[dirIdx(dir)]}</small></dd></div>
+    <div><dt>${tx('Vietor', 'Vítr')}</dt><dd><span class="arrow" style="transform:rotate(${dir + 180}deg)">↑</span> ${r0(c.wind_speed_10m)}<small>km/h ${DIR_SHORT[dirIdx(dir)]}</small></dd></div>
     <div><dt>Nárazy</dt><dd>${r0(c.wind_gusts_10m)}<small>km/h</small></dd></div>
-    <div><dt>Vlhkosť</dt><dd>${r0(c.relative_humidity_2m)}<small>%</small></dd></div>
+    <div><dt>${tx('Vlhkosť', 'Vlhkost')}</dt><dd>${r0(c.relative_humidity_2m)}<small>%</small></dd></div>
     <div><dt>Tlak</dt><dd>${r0(c.pressure_msl)}<small>hPa</small></dd></div>
-    <div><dt>Tendencia 3 h</dt><dd>${trendTxt || '–'}<small>hPa</small></dd></div>
-    <div><dt>Zrážky</dt><dd>${r1(c.precipitation)}<small>mm</small></dd></div>`;
+    <div><dt>${tx('Tendencia 3 h', 'Tendence 3 h')}</dt><dd>${trendTxt || '–'}<small>hPa</small></dd></div>
+    <div><dt>${tx('Zrážky', 'Srážky')}</dt><dd>${r1(c.precipitation)}<small>mm</small></dd></div>`;
   if (L.elevation != null) $('#coords').textContent = `50.236° S · 15.790° V · ${Math.round(L.elevation)} m n. m.`;
 }
 
@@ -788,7 +802,7 @@ function obsLine() {
     if (O.t[i] == null) continue;
     const age = (Date.now() / 1000 - O.time[i]) / 3600;
     if (age > 6) return '';
-    return `<div class="obs-line">namerané ${r1(O.t[i])} °C · nárazy ${r0(O.gust[i])} km/h · ČHMÚ ${fmtTime.format(O.time[i] * 1000)}</div>`;
+    return `<div class="obs-line">${tx('namerané', 'naměřeno')} ${r1(O.t[i])} °C · nárazy ${r0(O.gust[i])} km/h · ČHMÚ ${fmtTime.format(O.time[i] * 1000)}</div>`;
   }
   return '';
 }
@@ -799,7 +813,7 @@ function renderSkill() {
   const el = $('#skill');
   const S = state.skill;
   if (!S || state.demo.local) {
-    el.innerHTML = `<h3>Presnosť modelov v Plotišti</h3><p class="skill-lead">Vyhodnotenie sa zobrazí, keď GitHub Actions spracuje merania ČHMÚ (každú hodinu).</p>`;
+    el.innerHTML = `<h3>${tx('Presnosť modelov v Plotišti', 'Přesnost modelů v Plotišti')}</h3><p class="skill-lead">${tx('Vyhodnotenie sa zobrazí, keď GitHub Actions spracuje merania ČHMÚ (každú hodinu).', 'Vyhodnocení se zobrazí, až GitHub Actions zpracuje měření ČHMÚ (každou hodinu).')}</p>`;
     return;
   }
   const g = (m, k, L, f = 'mae_corr') => { const e = S.models[m] && S.models[m][k] && S.models[m][k][L]; return e ? (e[f] ?? e.mae) : null; };
@@ -819,35 +833,35 @@ function renderSkill() {
     const x = T[k] && T[k][L]; if (!x) return null;
     const gain = (x.mean - x.ai) / x.mean;
     const lvl = gain > 0.02 ? 'ok' : gain < -0.02 ? 'serious' : 'warn';
-    const pctTxt = Math.abs(gain) < 0.01 ? 'bez rozdielu' : `${gain > 0 ? 'o ' + Math.round(gain * 100) + ' % lepšie' : 'o ' + Math.round(-gain * 100) + ' % horšie'}`;
+    const pctTxt = Math.abs(gain) < 0.01 ? tx('bez rozdielu', 'bez rozdílu') : `${gain > 0 ? 'o ' + Math.round(gain * 100) + tx(' % lepšie', ' % lépe') : 'o ' + Math.round(-gain * 100) + tx(' % horšie', ' % hůře')}`;
     return `<b>${r1(x.ai)}</b> vs <b>${r1(x.mean)}</b> ${unit} <span class="chip" data-level="${lvl}">${pctTxt.toUpperCase()}</span>`;
   };
   const ct = cmp('t', 1, '°C', true), cg = cmp('g', 1, 'km/h', false);
-  el.innerHTML = `<h3>Presnosť modelov v Plotišti · ${S.window.days} dní</h3>
-    ${ct || cg ? `<p class="skill-lead">Priemerná chyba na zajtra za posledný týždeň, AI vs. obyčajný priemer modelov:
+  el.innerHTML = `<h3>${tx('Presnosť modelov v Plotišti', 'Přesnost modelů v Plotišti')} · ${S.window.days} ${tx('dní', 'dní')}</h3>
+    ${ct || cg ? `<p class="skill-lead">${tx('Priemerná chyba na zajtra za posledný týždeň, AI vs. obyčajný priemer modelov:', 'Průměrná chyba na zítřek za poslední týden, AI vs. obyčejný průměr modelů:')}
       ${ct ? `teplota ${ct}` : ''}${ct && cg ? ' · ' : ''}${cg ? `nárazy ${cg}` : ''}</p>` : ''}
     <div class="skill-wrap"><table class="skill">
-      <thead><tr><th>Model</th><th title="Priemerná chyba teploty na zajtra">°C D+1</th><th title="Priemerná chyba teploty o 3 dni">°C D+3</th><th title="Priemerná chyba nárazov na zajtra">km/h D+1</th><th>Váha AI</th></tr></thead>
+      <thead><tr><th>Model</th><th title="${tx('Priemerná chyba teploty na zajtra', 'Průměrná chyba teploty na zítřek')}">°C D+1</th><th title="${tx('Priemerná chyba teploty o 3 dni', 'Průměrná chyba teploty za 3 dny')}">°C D+3</th><th title="${tx('Priemerná chyba nárazov na zajtra', 'Průměrná chyba nárazů na zítřek')}">km/h D+1</th><th>${tx('Váha AI', 'Váha AI')}</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
-    <div class="skill-note">Chyby po korekcii (°C, km/h); zelená = najlepší model. Merania: ${S.station}.
-      Novšie dni majú väčšiu váhu. Pretrénované ${dayLabel(S.updated)} ${fmtTime.format(S.updated * 1000)}.</div>`;
+    <div class="skill-note">${tx('Chyby po korekcii (°C, km/h); zelená = najlepší model. Merania', 'Chyby po korekci (°C, km/h); zelená = nejlepší model. Měření')}: ${S.station}.
+      ${tx('Novšie dni majú väčšiu váhu. Pretrénované', 'Novější dny mají větší váhu. Přetrénováno')} ${dayLabel(S.updated)} ${fmtTime.format(S.updated * 1000)}.</div>`;
 }
 
 const HAZARDS = [
-  ['gust60', 'Silný vietor', 'nárazy ≥ 60 km/h'],
-  ['gust90', 'Víchrica', 'nárazy ≥ 90 km/h'],
-  ['rain10', 'Výdatný dážď', '≥ 10 mm / deň'],
-  ['rain25', 'Prívalový dážď', '≥ 25 mm / deň'],
-  ['storm', 'Búrky', 'CAPE ≥ 500 + zrážky'],
-  ['frost', 'Mráz', 'min. teplota < 0 °C'],
-  ['heat', 'Horúčava', 'max. teplota ≥ 30 °C'],
+  ['gust60', tx('Silný vietor', 'Silný vítr'), 'nárazy ≥ 60 km/h'],
+  ['gust90', tx('Víchrica', 'Vichřice'), 'nárazy ≥ 90 km/h'],
+  ['rain10', tx('Výdatný dážď', 'Vydatný déšť'), tx('≥ 10 mm / deň', '≥ 10 mm / den')],
+  ['rain25', tx('Prívalový dážď', 'Přívalový déšť'), tx('≥ 25 mm / deň', '≥ 25 mm / den')],
+  ['storm', tx('Búrky', 'Bouřky'), tx('CAPE ≥ 500 + zrážky', 'CAPE ≥ 500 + srážky')],
+  ['frost', tx('Mráz', 'Mráz'), 'min. teplota < 0 °C'],
+  ['heat', tx('Horúčava', 'Horko'), 'max. teplota ≥ 30 °C'],
 ];
 
 function renderRisk() {
   const D = state.derived;
   const head = `<tr><th></th>${D.days.map((d) => `<th>${dayShort(d.t)}</th>`).join('')}</tr>`;
   const rows = HAZARDS.map(([k, name, desc]) => `<tr><th class="h" scope="row">${name}<small>${desc}</small></th>${
-    D.days.map((d) => { const p = d[k]; return `<td data-level="${levelOf(p)}" title="${name} – ${dayLabel(d.t)}: ${pct(p)} (${d.members} členov)">${p == null ? '–' : Math.round(p * 100)}</td>`; }).join('')
+    D.days.map((d) => { const p = d[k]; return `<td data-level="${levelOf(p)}" title="${name} – ${dayLabel(d.t)}: ${pct(p)} (${d.members} ${tx('členov', 'členů')})">${p == null ? '–' : Math.round(p * 100)}</td>`; }).join('')
   }</tr>`).join('');
   $('#risk').innerHTML = `<thead>${head}</thead><tbody>${rows}</tbody>`;
 }
@@ -856,9 +870,9 @@ function renderSummary() {
   const D = state.derived, L = state.local;
   const [d0, d1] = D.days;
   const lines = [];
-  const desc = (d) => `${r0(d.tmin)} až ${r0(d.tmax)} °C${d.rainMed >= 0.5 ? `, zrážky okolo ${r1(d.rainMed)} mm` : ', bez výraznejších zrážok'}`;
+  const desc = (d) => `${r0(d.tmin)} až ${r0(d.tmax)} °C${d.rainMed >= 0.5 ? tx(`, zrážky okolo ${r1(d.rainMed)} mm`, `, srážky kolem ${r1(d.rainMed)} mm`) : tx(', bez výraznejších zrážok', ', bez výraznějších srážek')}`;
   if (d0) lines.push(`<b>Dnes</b> ${desc(d0)}.`);
-  if (d1) lines.push(`<b>Zajtra</b> ${desc(d1)}.`);
+  if (d1) lines.push(`<b>${tx('Zajtra', 'Zítra')}</b> ${desc(d1)}.`);
   // najvýraznejšie riziko v 7 dňoch
   let top = null;
   for (const d of D.days) for (const [k, name] of HAZARDS) {
@@ -866,17 +880,17 @@ function renderSummary() {
   }
   const near = state.tracks.find((t) => t.near < 800);
   const risk = top
-    ? `Najvýraznejšie riziko: <span class="chip" data-level="${levelOf(top.p)}">${top.name.toUpperCase()} ${pct(top.p)}</span> ${dayLabel(top.t)}`
-    : 'V najbližších 7 dňoch sa nečakajú nebezpečné javy (všetky pod 20 %).';
+    ? `${tx('Najvýraznejšie riziko', 'Nejvýraznější riziko')}: <span class="chip" data-level="${levelOf(top.p)}">${top.name.toUpperCase()} ${pct(top.p)}</span> ${dayLabel(top.t)}`
+    : tx('V najbližších 7 dňoch sa nečakajú nebezpečné javy (všetky pod 20 %).', 'V nejbližších 7 dnech se neočekávají nebezpečné jevy (všechny pod 20 %).');
   const trk = near
-    ? ` Tlaková níž ${near.label} (${r0(near.minP)} hPa) sa priblíži na ${r0(near.near)} km — ${dayLabel(near.nearAt.t)}`
+    ? tx(` Tlaková níž ${near.label} (${r0(near.minP)} hPa) sa priblíži na ${r0(near.near)} km — ${dayLabel(near.nearAt.t)}`, ` Tlaková níže ${near.label} (${r0(near.minP)} hPa) se přiblíží na ${r0(near.near)} km — ${dayLabel(near.nearAt.t)}`)
     : '';
   // istota: priemerný rozptyl modelov v teplote na 72 h
   const sp = D.spread.t.slice(0, 72).filter((x) => x != null);
   const avg = sp.length ? sp.reduce((a, b) => a + b, 0) / sp.length : null;
-  const conf = avg == null ? null : avg < 2 ? ['ok', 'vysoká'] : avg < 3.5 ? ['warn', 'stredná'] : ['serious', 'nízka'];
+  const conf = avg == null ? null : avg < 2 ? ['ok', tx('vysoká', 'vysoká')] : avg < 3.5 ? ['warn', tx('stredná', 'střední')] : ['serious', tx('nízka', 'nízká')];
   $('#summary').innerHTML = `<p>${lines.join(' ')}</p><p>${risk}${trk}</p>
-    ${conf ? `<div class="conf">Zhoda modelov na 3 dni: <span class="chip" data-level="${conf[0]}">${conf[1].toUpperCase()}</span> · priemerný rozdiel ${r1(avg)} °C · ${Object.keys(L.models).length} modelov</div>` : ''}`;
+    ${conf ? `<div class="conf">${tx('Zhoda modelov na 3 dni', 'Shoda modelů na 3 dny')}: <span class="chip" data-level="${conf[0]}">${conf[1].toUpperCase()}</span> · ${LANG === 'cs' ? 'průměrný rozdíl' : 'priemerný rozdiel'} ${r1(avg)} °C · ${Object.keys(L.models).length} ${LANG === 'cs' ? 'modelů' : 'modelov'}</div>` : ''}`;
 }
 
 /* ------------------------------------------------------------------ grafy (SVG) */
@@ -947,7 +961,7 @@ function drawChart(o) {
   const nowI = L.times.findIndex((t) => t > Date.now() / 1000) - 1;
   if (nowI >= 0) {
     svg.append('line').attr('x1', x(nowI)).attr('x2', x(nowI)).attr('y1', m.t).attr('y2', H - m.b).attr('stroke', '#8fd3ff').attr('stroke-dasharray', '2 3').attr('opacity', 0.7);
-    svg.append('text').attr('x', x(nowI) + 4).attr('y', m.t + 9).text('teraz').style('fill', '#8fd3ff');
+    svg.append('text').attr('x', x(nowI) + 4).attr('y', m.t + 9).text(tx('teraz', 'nyní')).style('fill', '#8fd3ff');
   }
   o.crossLine = svg.append('line').attr('y1', m.t).attr('y2', H - m.b).attr('stroke', '#dbe5f2').attr('stroke-width', 1).attr('opacity', 0);
   o.crossDot = svg.append('circle').attr('r', 4).attr('fill', '#8fd3ff').attr('stroke', '#0a111e').attr('stroke-width', 2).attr('opacity', 0);
@@ -976,11 +990,13 @@ function setupCharts() {
   const line = (vals, x, y) => d3.line().defined((d) => d != null).x((_, i) => x(i)).y((d) => y(d)).curve(d3.curveMonotoneX)(vals);
   const area = (lo, hi, x, y) => d3.area().defined((_, i) => lo[i] != null && hi[i] != null).x((_, i) => x(i)).y0((_, i) => y(lo[i])).y1((_, i) => y(hi[i])).curve(d3.curveMonotoneX)(lo);
 
+  const K = { ai: tx('AI predpoveď', 'AI předpověď'), mean: tx('priemer modelov', 'průměr modelů'), obs: tx('namerané', 'naměřeno'),
+    Ai: tx('AI predpoveď', 'AI předpověď'), Mean: tx('Priemer modelov', 'Průměr modelů'), Obs: tx('Namerané', 'Naměřeno') };
   chart($('#ch-temp'), {
     title: 'Teplota [°C]', height: 170, zeroLine: true,
-    key: () => (D().ai ? '<span><i style="--c:#8fd3ff"></i>AI predpoveď</span><span><i class="thin" style="--c:#dbe5f2"></i>priemer modelov</span>' : '<span><i style="--c:#8fd3ff"></i>priemer modelov</span>')
-      + (D().obs ? `<span><i style="--c:${OBS_COLOR}"></i>namerané</span>` : '')
-      + '<span><i class="thin" style="--c:#6b7a92"></i>jednotlivé modely</span><span><i class="band" style="--c:#8fd3ff"></i>ensemble 10–90 %</span>',
+    key: () => (D().ai ? `<span><i style="--c:#8fd3ff"></i>${K.ai}</span><span><i class="thin" style="--c:#dbe5f2"></i>${K.mean}</span>` : `<span><i style="--c:#8fd3ff"></i>${K.mean}</span>`)
+      + (D().obs ? `<span><i style="--c:${OBS_COLOR}"></i>${K.obs}</span>` : '')
+      + `<span><i class="thin" style="--c:#6b7a92"></i>${tx('jednotlivé modely', 'jednotlivé modely')}</span><span><i class="band" style="--c:#8fd3ff"></i>ensemble 10–90 %</span>`,
     domain: () => {
       const all = [...Object.values(L().models).flatMap((mm) => mm.t), ...D().band.t[0], ...D().band.t[1], ...(D().obs ? D().obs.t : [])].filter((v) => v != null);
       return [Math.min(...all) - 1, Math.max(...all) + 1];
@@ -997,14 +1013,14 @@ function setupCharts() {
       if (D().obs) svg.append('path').attr('d', line(D().obs.t, x, y)).attr('fill', 'none').attr('stroke', OBS_COLOR).attr('stroke-width', 2);
     },
     value: (i) => (D().ai ? D().ai.t[i] : D().cons.t[i]),
-    tip: (i) => (D().obs && D().obs.t[i] != null ? row('Namerané', r1(D().obs.t[i]) + ' °C') : '')
-      + (D().ai ? row('AI predpoveď', r1(D().ai.t[i]) + ' °C') : '') + row('Priemer modelov', r1(D().cons.t[i]) + ' °C')
+    tip: (i) => (D().obs && D().obs.t[i] != null ? row(K.Obs, r1(D().obs.t[i]) + ' °C') : '')
+      + (D().ai ? row(K.Ai, r1(D().ai.t[i]) + ' °C') : '') + row(K.Mean, r1(D().cons.t[i]) + ' °C')
       + row('Ensemble 10–90 %', `${r1(D().band.t[0][i])} – ${r1(D().band.t[1][i])}`) + '<hr>' + modelRows('t', (v) => r1(v) + ' °C'),
   });
 
   chart($('#ch-rain'), {
-    title: 'Zrážky [mm/h]', height: 130,
-    key: '<span><i class="band" style="--c:#8f9cff"></i>priemer modelov</span><span>pásik = pravdepodobnosť zrážok (ensemble)</span>',
+    title: tx('Zrážky [mm/h]', 'Srážky [mm/h]'), height: 130,
+    key: `<span><i class="band" style="--c:#8f9cff"></i>${K.mean}</span><span>${tx('pásik = pravdepodobnosť zrážok (ensemble)', 'proužek = pravděpodobnost srážek (ensemble)')}</span>`,
     domain: () => [0, Math.max(1, ...D().cons.p.filter((v) => v != null)) * 1.1],
     draw: (svg, x, y, W, H, m) => {
       const bw = Math.max(1, (x(1) - x(0)) - 1);
@@ -1021,19 +1037,19 @@ function setupCharts() {
       });
     },
     value: (i) => D().cons.p[i],
-    tip: (i) => (D().obs && D().obs.precip[i] != null ? row('Namerané', r1(D().obs.precip[i]) + ' mm') : '')
-      + row('Priemer modelov', r1(D().cons.p[i]) + ' mm') + row('Pravdep. zrážok', pct(D().pRain[i])) + '<hr>' + modelRows('p', (v) => r1(v) + ' mm'),
+    tip: (i) => (D().obs && D().obs.precip[i] != null ? row(K.Obs, r1(D().obs.precip[i]) + ' mm') : '')
+      + row(K.Mean, r1(D().cons.p[i]) + ' mm') + row(tx('Pravdep. zrážok', 'Pravděp. srážek'), pct(D().pRain[i])) + '<hr>' + modelRows('p', (v) => r1(v) + ' mm'),
   });
 
   chart($('#ch-wind'), {
-    title: 'Nárazy vetra [km/h]', height: 150,
-    key: () => (D().ai ? '<span><i style="--c:#5fc0f0"></i>AI predpoveď</span>' : '<span><i style="--c:#5fc0f0"></i>priemer modelov</span>')
-      + (D().obs ? `<span><i style="--c:${OBS_COLOR}"></i>namerané</span>` : '')
-      + '<span><i class="band" style="--c:#5fc0f0"></i>ensemble 10–90 %</span><span><i class="thin" style="--c:#ff8a3d"></i>prahy 60 / 90</span>',
+    title: tx('Nárazy vetra [km/h]', 'Nárazy větru [km/h]'), height: 150,
+    key: () => (D().ai ? `<span><i style="--c:#5fc0f0"></i>${K.ai}</span>` : `<span><i style="--c:#5fc0f0"></i>${K.mean}</span>`)
+      + (D().obs ? `<span><i style="--c:${OBS_COLOR}"></i>${K.obs}</span>` : '')
+      + `<span><i class="band" style="--c:#5fc0f0"></i>ensemble 10–90 %</span><span><i class="thin" style="--c:#ff8a3d"></i>${tx('prahy', 'prahy')} 60 / 90</span>`,
     domain: () => [0, Math.max(70, ...D().band.g[1].filter((v) => v != null), ...D().cons.g.filter((v) => v != null), ...(D().obs ? D().obs.gust.filter((v) => v != null) : [])) + 5],
     draw: (svg, x, y, W, H, m) => {
       svg.append('path').attr('d', area(D().band.g[0], D().band.g[1], x, y)).attr('fill', '#5fc0f0').attr('opacity', 0.14);
-      for (const [v, lab] of [[60, 'silný vietor'], [90, 'víchrica']]) {
+      for (const [v, lab] of [[60, tx('silný vietor', 'silný vítr')], [90, tx('víchrica', 'vichřice')]]) {
         if (v > y.domain()[1]) continue;
         svg.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(v)).attr('y2', y(v)).attr('stroke', '#ff8a3d').attr('stroke-dasharray', '4 4').attr('opacity', 0.6);
         svg.append('text').attr('x', W - m.r - 2).attr('y', y(v) - 3).attr('text-anchor', 'end').text(lab);
@@ -1042,8 +1058,8 @@ function setupCharts() {
       if (D().obs) svg.append('path').attr('d', line(D().obs.gust, x, y)).attr('fill', 'none').attr('stroke', OBS_COLOR).attr('stroke-width', 1.5);
     },
     value: (i) => (D().ai ? D().ai.g : D().cons.g)[i],
-    tip: (i) => (D().obs && D().obs.gust[i] != null ? row('Namerané', r0(D().obs.gust[i]) + ' km/h') : '')
-      + (D().ai ? row('AI predpoveď', r0(D().ai.g[i]) + ' km/h') : '') + row('Priemer modelov', r0(D().cons.g[i]) + ' km/h')
+    tip: (i) => (D().obs && D().obs.gust[i] != null ? row(K.Obs, r0(D().obs.gust[i]) + ' km/h') : '')
+      + (D().ai ? row(K.Ai, r0(D().ai.g[i]) + ' km/h') : '') + row(K.Mean, r0(D().cons.g[i]) + ' km/h')
       + row('Ensemble 10–90 %', `${r0(D().band.g[0][i])} – ${r0(D().band.g[1][i])}`) + '<hr>' + modelRows('g', (v) => r0(v) + ' km/h'),
   });
 }
@@ -1060,10 +1076,10 @@ const HIRES = [
 const WET = 0.05; // mm za 15 min (= 0,2 mm/h)
 // intenzita podľa mm/h
 const RAIN_CLASSES = [
-  { min: 0.1, name: 'slabý', color: '#2f4f8f' },
-  { min: 1, name: 'mierny', color: '#4f7be0' },
-  { min: 4, name: 'silný', color: '#93acff' },
-  { min: 10, name: 'prívalový', color: '#e6ebff' },
+  { min: 0.1, name: tx('slabý', 'slabý'), color: '#2f4f8f' },
+  { min: 1, name: tx('mierny', 'mírný'), color: '#4f7be0' },
+  { min: 4, name: tx('silný', 'silný'), color: '#93acff' },
+  { min: 10, name: tx('prívalový', 'přívalový'), color: '#e6ebff' },
 ];
 const rainClass = (mmh) => { let c = null; for (const k of RAIN_CLASSES) if (mmh >= k.min) c = k; return c; };
 
@@ -1109,18 +1125,18 @@ function precipHeadline(P) {
   const { time, p, snow } = P.m15;
   const now = Date.now() / 1000;
   const i0 = time.findIndex((t) => t > now);
-  if (i0 < 0) return 'Krátkodobá predpoveď zrážok nie je k dispozícii.';
+  if (i0 < 0) return tx('Krátkodobá predpoveď zrážok nie je k dispozícii.', 'Krátkodobá předpověď srážek není k dispozici.');
   const end12 = Math.min(time.length, i0 + 48);
   const sum = (a, b) => p.slice(a, b).reduce((s, v) => s + (v || 0), 0);
   const isSnow = (a, b) => snow.slice(a, b).some((v) => v > 0.05);
-  const kind = (a, b) => (isSnow(a, b) ? 'sneženie' : 'dážď');
+  const kind = (a, b) => (isSnow(a, b) ? tx('sneženie', 'sněžení') : tx('dážď', 'déšť'));
   const at = (i) => fmtTime.format((time[i] - 900) * 1000); // začiatok 15-min intervalu
   // práve prší? (model alebo posledné meranie ČHMÚ)
   const O = state.obs && !state.demo.local ? state.obs : null;
   const lastObs = O ? O.precip.length - 1 : -1;
   const obsWet = O && lastObs >= 0 && now - O.time[lastObs] < 2 * 3600 && (O.precip[lastObs] || 0) >= 0.1;
   const wetNow = (p[i0] || 0) >= WET || ((p[i0 - 1] || 0) >= WET);
-  const obsTxt = obsWet ? ` ČHMÚ za poslednú hodinu nameralo ${r1(O.precip[lastObs])} mm.` : '';
+  const obsTxt = obsWet ? tx(` ČHMÚ za poslednú hodinu nameralo ${r1(O.precip[lastObs])} mm.`, ` ČHMÚ za poslední hodinu naměřil ${r1(O.precip[lastObs])} mm.`) : '';
   if (wetNow || obsWet) {
     let e = i0;
     while (e < end12) {
@@ -1128,9 +1144,9 @@ function precipHeadline(P) {
       e++;
     }
     const k = cap(kind(i0, e));
-    if (e >= end12) return `<b>${k} pokračuje</b> aj ďalších 12 hodín, spolu asi ${r1(sum(i0, end12))} mm.${obsTxt}`;
-    if (e === i0) return `<b>Zrážky práve slabnú</b> a podľa ICON-D2 by mali do 15 minút ustať.${obsTxt}`;
-    return `<b>${k} skončí okolo ${at(e)}</b>. Do konca ešte asi ${r1(sum(i0, e))} mm.${obsTxt}`;
+    if (e >= end12) return tx(`<b>${k} pokračuje</b> aj ďalších 12 hodín, spolu asi ${r1(sum(i0, end12))} mm.`, `<b>${k} pokračuje</b> i dalších 12 hodin, celkem asi ${r1(sum(i0, end12))} mm.`) + obsTxt;
+    if (e === i0) return tx('<b>Zrážky práve slabnú</b> a podľa ICON-D2 by mali do 15 minút ustať.', '<b>Srážky právě slábnou</b> a podle ICON-D2 by měly do 15 minut ustat.') + obsTxt;
+    return tx(`<b>${k} skončí okolo ${at(e)}</b>. Do konca ešte asi ${r1(sum(i0, e))} mm.`, `<b>${k} skončí kolem ${at(e)}</b>. Do konce ještě asi ${r1(sum(i0, e))} mm.`) + obsTxt;
   }
   const s = p.findIndex((v, i) => i >= i0 && i < end12 && (v || 0) >= WET);
   if (s >= 0) {
@@ -1142,13 +1158,15 @@ function precipHeadline(P) {
     const ids = Object.keys(P.hourly.models);
     const agree = hIdx >= 0 ? ids.filter((id) => [0, 1].some((d) => (P.hourly.models[id][hIdx + d] || 0) >= 0.1)).length : 0;
     const mins = Math.round((time[s] - 900 - now) / 60);
-    const when = mins < 60 ? `o ${Math.max(5, Math.round(mins / 5) * 5)} min (${at(s)})` : `okolo ${at(s)}`;
-    return `<b>${cap(kind(s, e))} začne ${when}</b>${cls ? `, ${cls.name}` : ''}, spolu asi ${r1(sum(s, e))} mm.
-      Zhoda modelov s vysokým rozlíšením: ${agree} zo ${ids.length}.`;
+    const when = mins < 60 ? tx(`o ${Math.max(5, Math.round(mins / 5) * 5)} min (${at(s)})`, `za ${Math.max(5, Math.round(mins / 5) * 5)} min (${at(s)})`) : tx(`okolo ${at(s)}`, `kolem ${at(s)}`);
+    return tx(`<b>${cap(kind(s, e))} začne ${when}</b>${cls ? `, ${cls.name}` : ''}, spolu asi ${r1(sum(s, e))} mm.
+      Zhoda modelov s vysokým rozlíšením: ${agree} zo ${ids.length}.`, `<b>${cap(kind(s, e))} začne ${when}</b>${cls ? `, ${cls.name}` : ''}, celkem asi ${r1(sum(s, e))} mm.
+      Shoda modelů s vysokým rozlišením: ${agree} z ${ids.length}.`);
   }
   // nič v 12 h – ďalšie zrážky v 48 h podľa ICON-D2 / priemeru
   const n = p.findIndex((v, i) => i >= end12 && (v || 0) >= WET);
-  return `<b>Najbližších 12 hodín bez zrážok.</b>${n >= 0 ? ` Ďalšie zrážky asi ${dayShort(time[n])} okolo ${at(n)}.` : ' Ani do 48 hodín sa podľa ICON-D2 zrážky nečakajú.'}`;
+  return tx(`<b>Najbližších 12 hodín bez zrážok.</b>${n >= 0 ? ` Ďalšie zrážky asi ${dayShort(time[n])} okolo ${at(n)}.` : ' Ani do 48 hodín sa podľa ICON-D2 zrážky nečakajú.'}`,
+    `<b>Nejbližších 12 hodin bez srážek.</b>${n >= 0 ? ` Další srážky asi ${dayShort(time[n])} kolem ${at(n)}.` : ' Ani do 48 hodin se podle ICON-D2 srážky neočekávají.'}`);
 }
 
 let precipChart = null;
@@ -1156,19 +1174,19 @@ function renderPrecip() {
   const el = $('#precip');
   const P = state.precip;
   if (!P) { el.innerHTML = ''; return; }
-  el.innerHTML = `<div class="chart-head"><h3>Zrážky detailne</h3>
-      <div class="seg" role="group" aria-label="Rozsah" id="precip-range">
+  el.innerHTML = `<div class="chart-head"><h3>${tx('Zrážky detailne', 'Srážky podrobně')}</h3>
+      <div class="seg" role="group" aria-label="${tx('Rozsah', 'Rozsah')}" id="precip-range">
         <button type="button" data-h="3" aria-pressed="${state.precipRange === 3}">3 h</button>
         <button type="button" data-h="12" aria-pressed="${state.precipRange === 12}">12 h</button>
         <button type="button" data-h="48" aria-pressed="${state.precipRange === 48}">48 h</button></div></div>
     ${state.radar ? `<p class="precip-radar" data-level="${state.radar.summary.level}"><span class="lbl">Radar ${state.radar.summary.time}</span> ${state.radar.summary.html}</p>` : ''}
-    <p class="precip-head"><span class="lbl">Model ICON-D2</span> ${precipHeadline(P)}</p>
+    <p class="precip-head"><span class="lbl">${tx('Model ICON-D2', 'Model ICON-D2')}</span> ${precipHeadline(P)}</p>
     <div class="chart" id="ch-m15"><svg></svg><div class="tip" hidden></div></div>
     <div class="precip-key">${RAIN_CLASSES.map((c) => `<span style="--c:${c.color}">${c.name}${c.min === 10 ? ' ≥ 10' : ''}</span>`).join('')}<span class="u">mm/h · po 15 min · ICON-D2 2 km</span></div>
-    <h3 class="sub-h">Po hodinách · modely s vysokým rozlíšením [mm]</h3>
+    <h3 class="sub-h">${tx('Po hodinách · modely s vysokým rozlíšením [mm]', 'Po hodinách · modely s vysokým rozlišením [mm]')}</h3>
     <div class="pm-wrap">${precipMatrix(P)}</div>
-    <div class="skill-note">Hodnota pri hodine = úhrn za nasledujúcu hodinu (napr. 14 = 14:00–15:00). Načasovanie prehánok má neistotu asi ±1 h;
-      keď sa modely zhodujú, predpoveď je spoľahlivejšia.</div>`;
+    <div class="skill-note">${tx('Hodnota pri hodine = úhrn za nasledujúcu hodinu (napr. 14 = 14:00–15:00). Načasovanie prehánok má neistotu asi ±1 h; keď sa modely zhodujú, predpoveď je spoľahlivejšia.',
+      'Hodnota u hodiny = úhrn za následující hodinu (např. 14 = 14:00–15:00). Načasování přeháněk má nejistotu asi ±1 h; když se modely shodují, předpověď je spolehlivější.')}</div>`;
   el.querySelectorAll('#precip-range button').forEach((b) => b.addEventListener('click', () => {
     state.precipRange = +b.dataset.h;
     try { localStorage.setItem('mp-precip-range', b.dataset.h); } catch { /* nevadí */ }
@@ -1193,7 +1211,7 @@ function precipMatrix(P) {
   // pravdepodobnosť z ensemble (hodinové časy z hlavnej predpovede)
   if (state.derived && state.local) {
     const li = new Map(state.local.times.map((t, i) => [t, i]));
-    rows.push(`<tr class="prob"><th class="m">Pravdepodobnosť<small>ensemble ≥ 0,1 mm</small></th>${cols.map((c) => {
+    rows.push(`<tr class="prob"><th class="m">${tx('Pravdepodobnosť', 'Pravděpodobnost')}<small>ensemble ≥ 0,1 mm</small></th>${cols.map((c) => {
       const i = li.get(c.t); const pr = i == null ? null : state.derived.pRain[i];
       return pr == null ? '<td class="na">·</td>' : `<td style="--a:${(0.1 + 0.9 * pr).toFixed(2)}">${Math.round(pr * 100)}</td>`;
     }).join('')}</tr>`);
@@ -1238,7 +1256,7 @@ function drawPrecipChart() {
       .attr('rx', Math.min(2, bw / 2)).attr('fill', c.color).attr('stroke', snow[i] > 0.02 ? '#ffffff' : 'none').attr('stroke-width', 0.8);
   }
   svg.append('line').attr('x1', x(now)).attr('x2', x(now)).attr('y1', m.t).attr('y2', H - m.b).attr('stroke', '#8fd3ff').attr('stroke-dasharray', '2 3');
-  svg.append('text').attr('x', x(now) + 4).attr('y', m.t + 9).text('teraz').style('fill', '#8fd3ff');
+  svg.append('text').attr('x', x(now) + 4).attr('y', m.t + 9).text(tx('teraz', 'nyní')).style('fill', '#8fd3ff');
   const cross = svg.append('rect').attr('y', m.t).attr('height', H - m.b - m.t).attr('width', bw).attr('fill', '#ffffff14').attr('opacity', 0);
   svg.append('rect').attr('x', m.l).attr('y', 0).attr('width', W - m.l - m.r).attr('height', H).attr('fill', 'transparent')
     .on('pointermove', (ev) => {
@@ -1248,8 +1266,8 @@ function drawPrecipChart() {
       const r = (p[i] || 0) * 4, c = rainClass(r);
       cross.attr('x', x(time[i] - 900)).attr('opacity', 1);
       tip.innerHTML = `<b>${fmtTime.format((time[i] - 900) * 1000)}–${fmtTime.format(time[i] * 1000)}</b><hr>
-        <div class="r"><span>Úhrn</span><span>${r1(p[i])} mm</span></div><div class="r"><span>Intenzita</span><span>${r1(r)} mm/h</span></div>
-        <div class="r"><span>Typ</span><span>${c ? (snow[i] > 0.02 ? 'sneženie, ' : '') + c.name : 'bez zrážok'}</span></div>`;
+        <div class="r"><span>${tx('Úhrn', 'Úhrn')}</span><span>${r1(p[i])} mm</span></div><div class="r"><span>Intenzita</span><span>${r1(r)} mm/h</span></div>
+        <div class="r"><span>Typ</span><span>${c ? (snow[i] > 0.02 ? tx('sneženie, ', 'sněžení, ') : '') + c.name : tx('bez zrážok', 'bez srážek')}</span></div>`;
       tip.hidden = false;
       const tw = tip.offsetWidth;
       tip.style.left = (mx + 12 + tw > W ? mx - tw - 12 : mx + 12) + 'px'; tip.style.top = '6px';
@@ -1400,8 +1418,8 @@ function estimateMotion(frames) {
 
 function motionAt(M, x, y) {
   const cs = RW / M.NB, fx = clamp(x / cs - 0.5, 0, M.NB - 1), fy = clamp(y / cs - 0.5, 0, M.NB - 1);
-  const x0 = Math.min(M.NB - 2, Math.floor(fx)), y0 = Math.min(M.NB - 2, Math.floor(fy)), tx = fx - x0, ty = fy - y0;
-  const g = (a) => a[y0 * M.NB + x0] * (1 - tx) * (1 - ty) + a[y0 * M.NB + x0 + 1] * tx * (1 - ty) + a[(y0 + 1) * M.NB + x0] * (1 - tx) * ty + a[(y0 + 1) * M.NB + x0 + 1] * tx * ty;
+  const x0 = Math.min(M.NB - 2, Math.floor(fx)), y0 = Math.min(M.NB - 2, Math.floor(fy)), ax = fx - x0, ay = fy - y0;
+  const g = (a) => a[y0 * M.NB + x0] * (1 - ax) * (1 - ay) + a[y0 * M.NB + x0 + 1] * ax * (1 - ay) + a[(y0 + 1) * M.NB + x0] * (1 - ax) * ay + a[(y0 + 1) * M.NB + x0 + 1] * ax * ay;
   return [g(M.vx), g(M.vy)];
 }
 
@@ -1439,15 +1457,18 @@ function radarSummary(R) {
   const zNow = zAtHK(last);
   const M = R.motion;
   const speed = M ? Math.hypot(M.gx, M.gy) * KM_PX * 6 : 0;
-  const DIR_TO = ['sever', 'severovýchod', 'východ', 'juhovýchod', 'juh', 'juhozápad', 'západ', 'severozápad'];
+  const DIR_TO = tx(['sever', 'severovýchod', 'východ', 'juhovýchod', 'juh', 'juhozápad', 'západ', 'severozápad'],
+    ['sever', 'severovýchod', 'východ', 'jihovýchod', 'jih', 'jihozápad', 'západ', 'severozápad']);
   const toward = M ? DIR_TO[dirIdx((Math.atan2(M.gx, -M.gy) * 180 / Math.PI + 360) % 360)] : '';
-  const moveTxt = M && speed >= 5 ? `pohyb na ${toward} ${r0(speed)} km/h` : 'takmer bez pohybu';
-  const cls = (z) => { const c = rainClass(rateOf(z)); return c ? c.name : 'veľmi slabý'; };
+  const moveTxt = M && speed >= 5 ? `pohyb na ${toward} ${r0(speed)} km/h` : tx('takmer bez pohybu', 'téměř bez pohybu');
+  const cls = (z) => { const c = rainClass(rateOf(z)); return c ? c.name : tx('veľmi slabý', 'velmi slabý'); };
   let html, level = 'ok';
   if (zNow >= R_WET) {
     level = 'warn';
     const end = R.fc.findIndex((f) => zAtHK(f) < R_WET);
-    html = `V Plotišti práve prší (${cls(zNow)}, ${r1(rateOf(zNow))} mm/h). ` + (end >= 0 ? `Podľa pohybu zrážok (${moveTxt}) skončí asi o <b>${(end + 1) * 10} min</b>.` : `Podľa pohybu zrážok (${moveTxt}) bude pršať aj ďalších 90 min.`);
+    html = tx(`V Plotišti práve prší (${cls(zNow)}, ${r1(rateOf(zNow))} mm/h). `, `V Plotišti právě prší (${cls(zNow)}, ${r1(rateOf(zNow))} mm/h). `)
+      + (end >= 0 ? tx(`Podľa pohybu zrážok (${moveTxt}) skončí asi o <b>${(end + 1) * 10} min</b>.`, `Podle pohybu srážek (${moveTxt}) skončí asi za <b>${(end + 1) * 10} min</b>.`)
+        : tx(`Podľa pohybu zrážok (${moveTxt}) bude pršať aj ďalších 90 min.`, `Podle pohybu srážek (${moveTxt}) bude pršet i dalších 90 min.`));
   } else {
     // najbližšie echo
     let bd = Infinity, bp = null;
@@ -1457,13 +1478,13 @@ function radarSummary(R) {
       if (d < bd) { bd = d; bp = [x, y]; }
     }
     const arr = R.fc.findIndex((f) => zAtHK(f) >= R_WET);
-    if (!bp || bd * KM_PX > 250) html = 'Do 250 km od Plotišťa radar nevidí žiadne zrážky.';
+    if (!bp || bd * KM_PX > 250) html = tx('Do 250 km od Plotišťa radar nevidí žiadne zrážky.', 'Do 250 km od Plotiště radar nevidí žádné srážky.');
     else {
       const ll = rLonLat(...bp);
       const dir = DIR_ADV[dirIdx(bearing(HK.lat, HK.lon, ll[1], ll[0]))];
-      const near = `Najbližšie zrážky sú ${r0(bd * KM_PX)} km ${dir}, ${moveTxt}.`;
-      if (arr >= 0) { level = 'warn'; html = `${near} Odhad príchodu do Plotišťa: o <b>${(arr + 1) * 10} min</b> (${cls(zAtHK(R.fc[arr]))}).`; }
-      else html = `${near} V najbližších 90 min by mali Plotiště minúť.`;
+      const near = tx(`Najbližšie zrážky sú ${r0(bd * KM_PX)} km ${dir}, ${moveTxt}.`, `Nejbližší srážky jsou ${r0(bd * KM_PX)} km ${dir}, ${moveTxt}.`);
+      if (arr >= 0) { level = 'warn'; html = near + tx(` Odhad príchodu do Plotišťa: o <b>${(arr + 1) * 10} min</b> (${cls(zAtHK(R.fc[arr]))}).`, ` Odhad příchodu do Plotiště: za <b>${(arr + 1) * 10} min</b> (${cls(zAtHK(R.fc[arr]))}).`); }
+      else html = near + tx(' V najbližších 90 min by mali Plotiště minúť.', ' V nejbližších 90 min by měly Plotiště minout.');
     }
   }
   return { html, level, time: t, age, text: `Radar ${t}` };
@@ -1547,7 +1568,7 @@ function drawRadarMap() {
       ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(ex, ey); ctx.stroke();
       const a = Math.atan2(ey - hy, ex - hx);
       ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - 8 * Math.cos(a - 0.4), ey - 8 * Math.sin(a - 0.4)); ctx.lineTo(ex - 8 * Math.cos(a + 0.4), ey - 8 * Math.sin(a + 0.4)); ctx.fill();
-      ctx.font = '10px ' + css('--mono'); ctx.textAlign = 'center'; ctx.fillText('pohyb za 60 min', ex, ey + (ey >= hy ? 16 : -10)); ctx.textAlign = 'start';
+      ctx.font = '10px ' + css('--mono'); ctx.textAlign = 'center'; ctx.fillText(tx('pohyb za 60 min', 'pohyb za 60 min'), ex, ey + (ey >= hy ? 16 : -10)); ctx.textAlign = 'start';
     }
   }
   // mestá
@@ -1562,12 +1583,12 @@ function drawRadarMap() {
   ctx.font = '600 11px ' + css('--mono'); ctx.fillStyle = css('--accent'); ctx.fillText('PLOTIŠTĚ', hx + 8, hy - 8);
   if (!state.radar) {
     ctx.fillStyle = '#dbe5f2'; ctx.font = '13px ' + css('--body'); ctx.textAlign = 'center';
-    ctx.fillText(state.radarError ? 'Radar sa nepodarilo načítať.' : 'Načítavam radar…', map.w / 2, map.h / 2 + 40);
+    ctx.fillText(state.radarError ? tx('Radar sa nepodarilo načítať.', 'Radar se nepodařilo načíst.') : tx('Načítavam radar…', 'Načítám radar…'), map.w / 2, map.h / 2 + 40);
     ctx.textAlign = 'start';
   }
   if (fr && fr.fc) {
     ctx.font = '600 11px ' + css('--mono'); ctx.fillStyle = '#ffb547';
-    ctx.fillText('ODHAD · extrapolácia pohybu', 12, 22);
+    ctx.fillText(tx('ODHAD · extrapolácia pohybu', 'ODHAD · extrapolace pohybu'), 12, 22);
   }
 }
 
@@ -1577,20 +1598,20 @@ function radarReadout(ev) {
   const ll = map.rproj.invert([ev.clientX - r.left, ev.clientY - r.top]);
   const [px, py] = rPx(ll[0], ll[1]).map(Math.round);
   const el = $('#map-readout');
-  if (px < 0 || py < 0 || px >= RW || py >= RW) { el.innerHTML = 'Mimo radaru'; return; }
+  if (px < 0 || py < 0 || px >= RW || py >= RW) { el.innerHTML = tx('Mimo radaru', 'Mimo radar'); return; }
   const z = fr.z[py * RW + px], d = haversine(HK.lat, HK.lon, ll[1], ll[0]);
-  el.innerHTML = `${ll[1].toFixed(2)}° S ${ll[0].toFixed(2)}° V · <b>${r0(d)} km</b> od Plotišťa<br>
-    ${z >= 8 ? `odrazivosť <b>${z} dBZ</b> · intenzita <b>${r1(rateOf(z))} mm/h</b>` : 'bez zrážok'}`;
+  el.innerHTML = `${ll[1].toFixed(2)}° S ${ll[0].toFixed(2)}° V · <b>${r0(d)} km</b> ${tx('od Plotišťa', 'od Plotiště')}<br>
+    ${z >= 8 ? `${tx('odrazivosť', 'odrazivost')} <b>${z} dBZ</b> · intenzita <b>${r1(rateOf(z))} mm/h</b>` : tx('bez zrážok', 'bez srážek')}`;
 }
 
 function renderRadarPanel() {
   const el = $('#sys-list');
-  $('.systems h3').textContent = 'Radar · odhad na najbližších 90 minút';
+  $('.systems h3').textContent = tx('Radar · odhad na najbližších 90 minút', 'Radar · odhad na nejbližších 90 minut');
   const R = state.radar;
-  if (!R) { el.innerHTML = `<span class="empty">${state.radarError ? 'Radar nie je dostupný (RainViewer neodpovedá).' : 'Načítavam radar…'}</span>`; return; }
+  if (!R) { el.innerHTML = `<span class="empty">${state.radarError ? tx('Radar nie je dostupný (RainViewer neodpovedá).', 'Radar není dostupný (RainViewer neodpovídá).') : tx('Načítavam radar…', 'Načítám radar…')}</span>`; return; }
   const S = R.summary;
-  el.innerHTML = `<div class="radar-sum" data-level="${S.level}"><div class="t">${S.text}${S.age > 25 ? ` · <em>staré ${S.age} min</em>` : ''}</div><p>${S.html}</p>
-    <div class="radar-note">Odhad posúva zrážky v smere ich pohybu za posledných 30 min; nevie, či zosilnejú alebo zoslabnú. Zdroj: RainViewer.</div></div>`;
+  el.innerHTML = `<div class="radar-sum" data-level="${S.level}"><div class="t">${S.text}${S.age > 25 ? ` · <em>${tx('staré', 'stáří')} ${S.age} min</em>` : ''}</div><p>${S.html}</p>
+    <div class="radar-note">${tx('Odhad posúva zrážky v smere ich pohybu za posledných 30 min; nevie, či zosilnejú alebo zoslabnú.', 'Odhad posouvá srážky ve směru jejich pohybu za posledních 30 min; neví, zda zesílí nebo zeslábnou.')} Zdroj: RainViewer.</div></div>`;
 }
 
 let radarTimer = null;
@@ -1613,13 +1634,13 @@ function setStatus() {
   const st = $('#status');
   const demo = state.demo.local || state.demo.grid;
   st.dataset.state = demo ? 'demo' : 'live';
-  st.querySelector('span').textContent = demo ? 'Ukážkové dáta' : 'Živé dáta';
+  st.querySelector('span').textContent = demo ? tx('Ukážkové dáta', 'Ukázková data') : tx('Živé dáta', 'Živá data');
   $('#demo-note').hidden = !demo;
-  $('#updated').textContent = 'aktualizované ' + fmtTime.format(Date.now());
+  $('#updated').textContent = tx('aktualizované ', 'aktualizováno ') + fmtTime.format(Date.now());
 }
 
 async function load(force = false) {
-  const st = $('#status'); st.dataset.state = 'loading'; st.querySelector('span').textContent = 'Načítavam';
+  const st = $('#status'); st.dataset.state = 'loading'; st.querySelector('span').textContent = tx('Načítavam', 'Načítám');
   const getLocal = async () => {
     const c = !force && cacheGet('mp-local-v1', 30);
     if (c) return c;
@@ -1671,7 +1692,7 @@ function togglePlay(on) {
   const b = $('#play');
   on = on ?? !playTimer;
   clearInterval(playTimer); playTimer = null;
-  b.setAttribute('aria-pressed', on); b.textContent = on ? '❚❚ Pauza' : '▶ Prehrať';
+  b.setAttribute('aria-pressed', on); b.textContent = on ? '❚❚ Pauza' : tx('▶ Prehrať', '▶ Přehrát');
   if (on) playTimer = setInterval(() => {
     if (state.layer === 'radar') { const n = radarSeq().length; if (n) setStep((state.rstep + 1) % n); }
     else setStep((state.step + 1) % state.grid.times.length);
@@ -1685,8 +1706,26 @@ function toggleMax(which) {
   requestAnimationFrame(() => { mapResize(); drawCharts(); drawPrecipChart(); });
 }
 
+function applyLang() {
+  document.documentElement.lang = LANG;
+  if (LANG === 'cs') {
+    document.querySelectorAll('[data-cs]').forEach((el) => { el.innerHTML = el.dataset.cs; });
+    document.querySelectorAll('[data-cs-aria]').forEach((el) => el.setAttribute('aria-label', el.dataset.csAria));
+    document.querySelectorAll('[data-cs-title]').forEach((el) => el.setAttribute('title', el.dataset.csTitle));
+  }
+  document.querySelectorAll('#lang-seg button').forEach((b) => {
+    b.setAttribute('aria-pressed', b.dataset.lang === LANG);
+    b.addEventListener('click', () => {
+      if (b.dataset.lang === LANG) return;
+      try { localStorage.setItem('mp-lang', b.dataset.lang); } catch { /* nevadí */ }
+      location.reload();
+    });
+  });
+}
+
 function init() {
-  const tick = () => { $('#clock').textContent = new Intl.DateTimeFormat('sk-SK', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date()); };
+  applyLang();
+  const tick = () => { $('#clock').textContent = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date()); };
   tick(); setInterval(tick, 1000);
   renderLegend();
 

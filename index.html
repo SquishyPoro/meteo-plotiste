@@ -19,32 +19,33 @@
       <small id="coords">50.236° S · 15.790° V</small>
     </div>
     <div class="spacer"></div>
-    <span class="status" id="status" data-state="loading"><i></i><span>Načítavam</span></span>
+    <span class="status" id="status" data-state="loading"><i></i><span data-cs="Načítám">Načítavam</span></span>
     <span class="updated" id="updated"></span>
-    <button class="btn" id="refresh" type="button">Obnoviť</button>
+    <div class="seg" role="group" aria-label="Jazyk" id="lang-seg"><button type="button" data-lang="sk" aria-pressed="true">SK</button><button type="button" data-lang="cs" aria-pressed="false">CZ</button></div>
+    <button class="btn" id="refresh" type="button" data-cs="Obnovit">Obnoviť</button>
     <span class="clock" id="clock"></span>
   </header>
 
-  <div class="demo-note" id="demo-note" hidden>
+  <div class="demo-note" id="demo-note" hidden data-cs="Ukázkový režim: živá data se nepodařilo načíst, proto jsou zobrazeny smyšlené ukázkové hodnoty. Na adrese GitHub Pages se načítají skutečné předpovědi z Open-Meteo.">
     Ukážkový režim: živé dáta sa nepodarilo načítať, preto sú zobrazené vymyslené ukážkové hodnoty.
     Na adrese GitHub Pages sa načítajú skutočné predpovede z Open-Meteo.
   </div>
 
   <main class="windows" id="windows">
     <!-- OKNO 1: Európa -->
-    <section class="win" id="win-europe" aria-label="Európa">
+    <section class="win" id="win-europe" aria-label="Európa" data-cs-aria="Evropa">
       <div class="win-head">
-        <h2>Európa</h2>
-        <span class="sub" id="eu-sub">tlak · vietor · zrážky · búrky</span>
+        <h2 data-cs="Evropa">Európa</h2>
+        <span class="sub" id="eu-sub" data-cs="tlak · vítr · srážky · bouřky">tlak · vietor · zrážky · búrky</span>
         <span class="spacer"></span>
         <div class="seg" role="group" aria-label="Vrstva mapy" id="layer-seg">
-          <button type="button" data-layer="wind" aria-pressed="true">Vietor</button>
-          <button type="button" data-layer="rain" aria-pressed="false">Zrážky</button>
-          <button type="button" data-layer="cape" aria-pressed="false">Búrky</button>
+          <button type="button" data-layer="wind" aria-pressed="true" data-cs="Vítr">Vietor</button>
+          <button type="button" data-layer="rain" aria-pressed="false" data-cs="Srážky">Zrážky</button>
+          <button type="button" data-layer="cape" aria-pressed="false" data-cs="Bouřky">Búrky</button>
           <button type="button" data-layer="none" aria-pressed="false">Tlak</button>
           <button type="button" data-layer="radar" aria-pressed="false">Radar</button>
         </div>
-        <button class="max-btn" type="button" data-max="europe" aria-label="Zväčšiť okno Európa" title="Zväčšiť / zmenšiť (Esc)">
+        <button class="max-btn" type="button" data-max="europe" aria-label="Zväčšiť okno Európa" title="Zväčšiť / zmenšiť (Esc)" data-cs-aria="Zvětšit okno Evropa" data-cs-title="Zvětšit / zmenšit (Esc)">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/></svg>
         </button>
       </div>
@@ -52,16 +53,16 @@
         <canvas id="map"></canvas>
         <div class="hk-pulse" id="hk-pulse"></div>
         <div class="map-legend" id="map-legend"></div>
-        <div class="map-readout" id="map-readout">Prejdi myšou alebo ťukni na mapu</div>
+        <div class="map-readout" id="map-readout" data-cs="Přejeď myší nebo ťukni na mapu">Prejdi myšou alebo ťukni na mapu</div>
       </div>
       <div class="timeline">
-        <button class="btn" type="button" id="play" aria-pressed="false">▶ Prehrať</button>
-        <input type="range" id="time" min="0" max="40" value="0" aria-label="Čas predpovede">
+        <button class="btn" type="button" id="play" aria-pressed="false" data-cs="▶ Přehrát">▶ Prehrať</button>
+        <input type="range" id="time" min="0" max="40" value="0" aria-label="Čas predpovede" data-cs-aria="Čas předpovědi">
         <span class="tl-label" id="tl-label"></span>
       </div>
       <div class="systems">
-        <h3>Sledované tlakové níže a ich dosah na Plotiště</h3>
-        <div class="sys-list" id="sys-list"><span class="empty">Načítavam…</span></div>
+        <h3 data-cs="Sledované tlakové níže a jejich dosah na Plotiště">Sledované tlakové níže a ich dosah na Plotiště</h3>
+        <div class="sys-list" id="sys-list"><span class="empty" data-cs="Načítám…">Načítavam…</span></div>
       </div>
     </section>
 
@@ -69,9 +70,9 @@
     <section class="win" id="win-local" aria-label="Plotiště nad Labem">
       <div class="win-head">
         <h2>Plotiště n. L.</h2>
-        <span class="sub">10 modelov · 3 ensemble · merania ČHMÚ</span>
+        <span class="sub" data-cs="10 modelů · 3 ensemble · měření ČHMÚ">10 modelov · 3 ensemble · merania ČHMÚ</span>
         <span class="spacer"></span>
-        <button class="max-btn" type="button" data-max="local" aria-label="Zväčšiť okno Plotiště" title="Zväčšiť / zmenšiť (Esc)">
+        <button class="max-btn" type="button" data-max="local" aria-label="Zväčšiť okno Plotiště" title="Zväčšiť / zmenšiť (Esc)" data-cs-aria="Zvětšit okno Plotiště" data-cs-title="Zvětšit / zmenšit (Esc)">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/></svg>
         </button>
       </div>
@@ -82,7 +83,7 @@
           <div class="block precip" id="precip"></div>
           <div class="summary" id="summary"></div>
           <div class="block">
-            <h3>Pravdepodobnosť javov (ensemble, 7 dní)</h3>
+            <h3 data-cs="Pravděpodobnost jevů (ensemble, 7 dní)">Pravdepodobnosť javov (ensemble, 7 dní)</h3>
             <div class="risk-wrap"><table class="risk" id="risk"></table></div>
             <div class="risk-key">
               <span style="--c:#0f1a2b">pod 20 %</span>
@@ -97,7 +98,7 @@
           <div class="chart" id="ch-temp"></div>
           <div class="chart" id="ch-rain"></div>
           <div class="chart" id="ch-wind"></div>
-          <p class="foot">Zdroje: Open-Meteo (ECMWF, DWD ICON, ICON-D2, ICON-EU, HARMONIE-AROME KNMI a DMI, NOAA GFS, Météo-France, UK Met Office, Kanada GEM),
+          <p class="foot" data-cs="Zdroje: Open-Meteo (ECMWF, DWD ICON, ICON-D2, ICON-EU, HARMONIE-AROME KNMI a DMI, NOAA GFS, Météo-France, UK Met Office, Kanada GEM), ensemble ECMWF ENS, ICON-EPS, GEFS. Měření: ČHMÚ, stanice Hradec Králové – Svobodné Dvory (záloha Nový Hradec Králové). Radar: RainViewer. Obrysy map: Natural Earth.">Zdroje: Open-Meteo (ECMWF, DWD ICON, ICON-D2, ICON-EU, HARMONIE-AROME KNMI a DMI, NOAA GFS, Météo-France, UK Met Office, Kanada GEM),
             ensemble ECMWF ENS, ICON-EPS, GEFS. Merania: ČHMÚ, stanica Hradec Králové – Svobodné Dvory
             (záloha Nový Hradec Králové). Radar: RainViewer. Obrysy máp: Natural Earth.</p>
         </div>

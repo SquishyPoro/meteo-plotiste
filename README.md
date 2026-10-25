@@ -1,6 +1,6 @@
 # Meteo Plotiště
 
-Osobný meteo dashboard pre Plotiště nad Labem (Hradec Králové).
+Osobný meteo dashboard pre Plotiště nad Labem (Hradec Králové). Jazyk stránky sa prepína vpravo hore (SK / CZ).
 
 - **Okno Európa:** mapa nárazov vetra, zrážok, búrkového potenciálu (CAPE) a izobár na 5 dní, automatická detekcia tlakových níží, ich dráhy a vzdialenosť od Plotišťa.
 - **Okno Plotiště:** aktuálne počasie, porovnanie 6 modelov (ECMWF, ICON, GFS, Météo-France, UKMO, GEM), ensemble pásma a pravdepodobnosti javov na 7 dní.
