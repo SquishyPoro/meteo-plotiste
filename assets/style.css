@@ -323,6 +323,7 @@ table.pm tr.prob td.na { background: #0f1a2b; color: var(--dim); }
 .radar-sum .t { font: 600 12px var(--mono); color: var(--fg); }
 .radar-sum .t em { font-style: normal; color: var(--warn); }
 .radar-sum p { margin: 4px 0 0; }
+.li-line { margin: 4px 0 0; }
 .radar-note { margin-top: 5px; font: 10.5px var(--mono); color: var(--dim); }
 .map-legend .keys.rk span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
 

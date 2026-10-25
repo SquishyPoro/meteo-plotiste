@@ -3,6 +3,8 @@
   "rain_soon": true,
   "rain_soon_minutes": 60,
   "storm_nearby": true,
+  "lightning": true,
+  "lightning_km": 20,
   "wind": true,
   "wind_kmh": 60,
   "wind_prob": 0.5,

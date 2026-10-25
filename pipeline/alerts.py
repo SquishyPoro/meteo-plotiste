@@ -191,6 +191,30 @@ def radar():
             'storm_near': storm_near, 'storm_path': storm_path, 'moving': v is not None}
 
 
+def lightning(radius_km=20):
+    """Blesky zo satelitu MTG (EUMETSAT) za posledných ~15 min: (počet pixelov do radius_km, najbližšia vzdialenosť)."""
+    E = 20037508.342789244
+    mpx = 2 * E / (256 * 2 ** RZ)
+    x0, ytop = -E + RX0 * 256 * mpx, E - RY0 * 256 * mpx
+    bbox = f'{x0:.1f},{ytop - RW * mpx:.1f},{x0 + RW * mpx:.1f},{ytop:.1f}'
+    newest = int((time.time() - 600) // 300 * 300)
+    hx, hy = hk_px()
+    yy, xx = np.mgrid[:RW, :RW]
+    dist = np.hypot(xx - hx, yy - hy) * KM_PX
+    count, nearest = 0, None
+    for k in range(3):
+        t = dt.datetime.fromtimestamp(newest - k * 300, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        png = get('https://view.eumetsat.int/geoserver/wms?service=WMS&version=1.3.0&request=GetMap&layers=mtg_fd:li_afa&styles='
+                  f'&format=image/png&transparent=true&crs=EPSG:3857&bbox={bbox}&width={RW}&height={RW}&time={t}', raw=True)
+        a = np.array(Image.open(io.BytesIO(png)).convert('RGBA'))[..., 3] > 30
+        if a.any():
+            d = dist[a]
+            count += int((d <= radius_km).sum())
+            nearest = float(d.min()) if nearest is None else min(nearest, float(d.min()))
+    log(f'blesky: {count} px do {radius_km} km, najbližší {nearest if nearest is None else round(nearest)} km')
+    return count, nearest
+
+
 def rate(dbz):
     return (10 ** (dbz / 10) / 200) ** 0.625
 
@@ -373,6 +397,17 @@ def main():
                 mark('rain_soon')
         except Exception as e:
             log('ICON-D2 zlyhal:', e)
+
+    # --- blesky do 20 km (satelit MTG)
+    if CFG.get('lightning', True):
+        try:
+            cnt, near = lightning(CFG.get('lightning_km', 20))
+            if cnt and once('blesky', 2):
+                send(topic, 'Blesky pri Plotišti', f'Satelit MTG zaznamenal blesky {round(near)} km od Plotišťa (posledných 15 min). '
+                     'Búrka je blízko – choď dovnútra a odpoj citlivé spotrebiče.', 'zap,warning', 4 if quiet else 5, dry)
+                mark('blesky')
+        except Exception as e:
+            log('blesky zlyhali:', e)
 
     # --- predpoveď (každú hodinu stačí)
     if now - state.get('last_forecast', 0) > 50 * 60 or '--force' in sys.argv:

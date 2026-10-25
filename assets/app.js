@@ -565,8 +565,6 @@ function mapResize() {
     if (!ll) { map.idx[k] = -1; continue; }
     map.idx[k] = (ll[0] - GRID.lon0) / GRID.dlon; map.idx[k + 1] = (ll[1] - GRID.lat0) / GRID.dlat;
   }
-  const hp = map.proj([HK.lon, HK.lat]);
-  const pulse = $('#hk-pulse'); pulse.style.left = hp[0] + 'px'; pulse.style.top = hp[1] + 'px';
   drawMap();
 }
 
@@ -637,7 +635,10 @@ function smoothPath(ctx, pts) {
 function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
 function positionPulse(proj) {
-  const hp = proj([HK.lon, HK.lat]), pulse = $('#hk-pulse');
+  const pulse = $('#hk-pulse');
+  pulse.hidden = state.layer === 'radar'; // v radare kreslí Plotiště priamo plátno
+  if (pulse.hidden) return;
+  const hp = proj([HK.lon, HK.lat]);
   pulse.style.left = hp[0] + 'px'; pulse.style.top = hp[1] + 'px';
 }
 
@@ -726,7 +727,7 @@ function renderLegend() {
   const el = $('#map-legend');
   if (state.layer === 'radar') {
     el.innerHTML = `<div class="lt">${tx('Radar · intenzita [mm/h]', 'Radar · intenzita [mm/h]')}</div><div class="keys rk">${RAIN_CLASSES.map((c) => `<span style="--c:${c.color}">${c.name} ≥ ${String(c.min).replace('.', ',')}</span>`).join('')}
-      <span style="--c:${R_STORM}">${tx('búrka, krúpy', 'bouřka, kroupy')} ≥ 50 dBZ</span></div><div class="keys"><span>${tx('šípka = pohyb zrážok za 60 min', 'šipka = pohyb srážek za 60 min')}</span></div>`;
+      <span style="--c:${R_STORM}">${tx('búrka, krúpy', 'bouřka, kroupy')} ≥ 50 dBZ</span></div><div class="keys rk"><span style="--c:#ffe65a">${tx('blesky za 30 min (satelit MTG)', 'blesky za 30 min (satelit MTG)')}</span></div><div class="keys"><span>${tx('šípka = pohyb zrážok za 60 min', 'šipka = pohyb srážek za 60 min')}</span></div>`;
     return;
   }
   const L = LAYERS[state.layer];
@@ -1194,13 +1195,14 @@ let precipChart = null;
 function renderPrecip() {
   const el = $('#precip');
   const P = state.precip;
+  el.hidden = !P;
   if (!P) { el.innerHTML = ''; return; }
   el.innerHTML = `<div class="chart-head"><h3>${tx('Zrážky detailne', 'Srážky podrobně')}</h3>
       <div class="seg" role="group" aria-label="${tx('Rozsah', 'Rozsah')}" id="precip-range">
         <button type="button" data-h="3" aria-pressed="${state.precipRange === 3}">3 h</button>
         <button type="button" data-h="12" aria-pressed="${state.precipRange === 12}">12 h</button>
         <button type="button" data-h="48" aria-pressed="${state.precipRange === 48}">48 h</button></div></div>
-    ${state.radar ? `<p class="precip-radar" data-level="${state.radar.summary.level}"><span class="lbl">Radar ${state.radar.summary.time}</span> ${state.radar.summary.html}</p>` : ''}
+    ${state.radar ? `<p class="precip-radar" data-level="${state.radar.summary.level}"><span class="lbl">Radar ${state.radar.summary.time}</span> ${state.radar.summary.html}${state.lightning && state.lightning.near && state.lightning.near.d <= 100 ? lightningText(false) : ''}</p>` : ''}
     <p class="precip-head"><span class="lbl">${tx('Model ICON-D2', 'Model ICON-D2')}</span> ${precipHeadline(P)}</p>
     <div class="chart" id="ch-m15"><svg></svg><div class="tip" hidden></div></div>
     <div class="precip-key">${RAIN_CLASSES.map((c) => `<span style="--c:${c.color}">${c.name}${c.min === 10 ? ' ≥ 10' : ''}</span>`).join('')}<span class="u">mm/h · po 15 min · ICON-D2 2 km</span></div>
@@ -1511,6 +1513,42 @@ function radarSummary(R) {
   return { html, level, time: t, age, text: `Radar ${t}` };
 }
 
+/* ---- blesky: EUMETSAT MTG Lightning Imager (Accumulated Flash Area), snímky po 5 min, rovnaká mriežka ako radar */
+const LI_WMS = 'https://view.eumetsat.int/geoserver/wms';
+const LI_STEPS = 6; // posledných 30 min
+function liBbox() {
+  const E = 20037508.342789244, mpx = (2 * E) / (256 * 2 ** RZ);
+  const x0 = -E + RX0 * 256 * mpx, yTop = E - RY0 * 256 * mpx;
+  return [x0, yTop - RW * mpx, x0 + RW * mpx, yTop].map((v) => v.toFixed(1)).join(',');
+}
+async function loadLightning() {
+  const step = 300, newest = Math.floor((Date.now() / 1000 - 600) / step) * step; // ~10 min oneskorenie
+  const frames = await Promise.all(Array.from({ length: LI_STEPS }, (_, k) => newest - k * step).map(async (t) => {
+    const url = `${LI_WMS}?service=WMS&version=1.3.0&request=GetMap&layers=mtg_fd:li_afa&styles=&format=image/png&transparent=true`
+      + `&crs=EPSG:3857&bbox=${liBbox()}&width=${RW}&height=${RW}&time=${new Date(t * 1000).toISOString().slice(0, 19)}Z`;
+    try {
+      const im = await loadImg(url);
+      const cv = document.createElement('canvas'); cv.width = cv.height = RW;
+      const ctx = cv.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(im, 0, 0);
+      const d = ctx.getImageData(0, 0, RW, RW).data;
+      const pts = [];
+      for (let y = 0; y < RW; y += 2) for (let x = 0; x < RW; x += 2) if (d[(y * RW + x) * 4 + 3] > 30) pts.push([x, y]);
+      return { time: t, pts };
+    } catch { return null; }
+  }));
+  const ok = frames.filter(Boolean);
+  if (!ok.length) throw new Error('blesky nedostupné');
+  // najbližší blesk
+  let near = null;
+  for (const f of ok) for (const [x, y] of f.pts) {
+    const dkm = Math.hypot(x - HK_PX[0], y - HK_PX[1]) * KM_PX;
+    if (!near || dkm < near.d) near = { d: dkm, x, y, time: f.time };
+  }
+  const n50 = ok.reduce((s, f) => s + f.pts.filter(([x, y]) => Math.hypot(x - HK_PX[0], y - HK_PX[1]) * KM_PX <= 50).length, 0);
+  return { frames: ok, near, n50, newest };
+}
+
 /* ---- zobrazenie na mape */
 const R_CITIES = [['Praha', 14.42, 50.09], ['Pardubice', 15.78, 50.04], ['Liberec', 15.06, 50.77], ['Jičín', 15.35, 50.44], ['Trutnov', 15.91, 50.56],
   ['Náchod', 16.16, 50.42], ['Kolín', 15.20, 50.03], ['Chrudim', 15.80, 49.95], ['Ústí n. Orl.', 16.39, 49.97], ['Havlíčkův Brod', 15.58, 49.61],
@@ -1572,6 +1610,20 @@ function drawRadarMap() {
   }
   if (!map.coast) { map.coast = toLines(window.EU_GEO.coast); map.borders = toLines(window.EU_GEO.borders); }
   ctx.beginPath(); path(map.borders); ctx.strokeStyle = '#6f88aa'; ctx.lineWidth = 1.1; ctx.stroke();
+  if (state.lightning) { // blesky za 30 min: čím novší, tým jasnejší
+    const sc = (x1 - x0) / RW, L = state.lightning;
+    for (const f of [...L.frames].reverse()) {
+      const age = (L.newest - f.time) / 1800;
+      ctx.fillStyle = `rgba(255, 230, 90, ${(1 - age * 0.75).toFixed(2)})`;
+      const seen = new Set();
+      for (const [x, y] of f.pts) {
+        const k = ((x >> 3) << 12) | (y >> 3); if (seen.has(k)) continue; seen.add(k); // 1 značka na ~6 km
+        const sx = x0 + x * sc, sy = y0 + y * sc;
+        ctx.beginPath(); ctx.moveTo(sx - 1.5, sy - 5); ctx.lineTo(sx + 2.5, sy - 1); ctx.lineTo(sx - 0.5, sy - 0.5); ctx.lineTo(sx + 1.5, sy + 5);
+        ctx.lineTo(sx - 2.5, sy + 1); ctx.lineTo(sx + 0.5, sy + 0.5); ctx.closePath(); ctx.fill();
+      }
+    }
+  }
   // kruhy 25 / 50 / 100 km
   ctx.setLineDash([3, 4]); ctx.strokeStyle = '#8fd3ff55'; ctx.fillStyle = '#8fd3ffaa';
   for (const km of [25, 50, 100]) {
@@ -1601,6 +1653,7 @@ function drawRadarMap() {
   }
   const [hx, hy] = proj([HK.lon, HK.lat]);
   ctx.beginPath(); ctx.arc(hx, hy, 3, 0, Math.PI * 2); ctx.fillStyle = css('--accent'); ctx.fill();
+  ctx.beginPath(); ctx.arc(hx, hy, 7, 0, Math.PI * 2); ctx.strokeStyle = css('--accent'); ctx.lineWidth = 1.5; ctx.stroke();
   ctx.font = '600 11px ' + css('--mono'); ctx.fillStyle = css('--accent'); ctx.fillText('PLOTIŠTĚ', hx + 8, hy - 8);
   if (!state.radar) {
     ctx.fillStyle = '#dbe5f2'; ctx.font = '13px ' + css('--body'); ctx.textAlign = 'center';
@@ -1631,12 +1684,28 @@ function renderRadarPanel() {
   const R = state.radar;
   if (!R) { el.innerHTML = `<span class="empty">${state.radarError ? tx('Radar nie je dostupný (RainViewer neodpovedá).', 'Radar není dostupný (RainViewer neodpovídá).') : tx('Načítavam radar…', 'Načítám radar…')}</span>`; return; }
   const S = R.summary;
-  el.innerHTML = `<div class="radar-sum" data-level="${S.level}"><div class="t">${S.text}${S.age > 25 ? ` · <em>${tx('staré', 'stáří')} ${S.age} min</em>` : ''}</div><p>${S.html}</p>
+  el.innerHTML = `<div class="radar-sum" data-level="${S.level}"><div class="t">${S.text}${S.age > 25 ? ` · <em>${tx('staré', 'stáří')} ${S.age} min</em>` : ''}</div><p>${S.html}</p>${lightningText(true)}
     <div class="radar-note">${tx('Odhad posúva zrážky v smere ich pohybu za posledných 30 min; nevie, či zosilnejú alebo zoslabnú.', 'Odhad posouvá srážky ve směru jejich pohybu za posledních 30 min; neví, zda zesílí nebo zeslábnou.')} Zdroj: RainViewer.</div></div>`;
+}
+
+function lightningText(block) {
+  const L = state.lightning;
+  if (!L) return '';
+  let t;
+  if (!L.near || L.near.d > 200) t = tx('Za posledných 30 min žiadne blesky do 200 km.', 'Za posledních 30 min žádné blesky do 200 km.');
+  else {
+    const ll = rLonLat(L.near.x, L.near.y), dir = DIR_ADV[dirIdx(bearing(HK.lat, HK.lon, ll[1], ll[0]))];
+    const ago = Math.max(10, Math.round((Date.now() / 1000 - L.near.time) / 60));
+    t = tx(`Najbližší blesk <b>${r0(L.near.d)} km ${dir}</b> (pred ~${ago} min)`, `Nejbližší blesk <b>${r0(L.near.d)} km ${dir}</b> (před ~${ago} min)`)
+      + (L.n50 ? tx(`, do 50 km ${L.n50}× za 30 min.`, `, do 50 km ${L.n50}× za 30 min.`) : '.');
+  }
+  return block ? `<p class="li-line">⚡ ${t}</p>` : ` ⚡ ${t}`;
 }
 
 let radarTimer = null;
 async function refreshRadar() {
+  loadLightning().then((L) => { state.lightning = L; if (state.layer === 'radar') { drawMap(); renderSystems(); } if (state.precip) renderPrecip(); })
+    .catch((e) => { console.warn('Blesky:', e); state.lightning = null; });
   try {
     const prevLen = state.radar ? state.radar.frames.length : 0;
     state.radar = await loadRadar();
