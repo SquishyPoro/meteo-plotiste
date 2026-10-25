@@ -31,6 +31,14 @@ jobs:
             echo "::error title=Chyba::$(tail -n 25 run.log | sed ':a;N;$!ba;s/\n/%0A/g')"
             exit 1
           fi
+      - name: Archív predpovedí a overenie
+        run: |
+          set -o pipefail
+          if python pipeline/verify.py 2>&1 | tee verify.log; then
+            echo "::notice title=Overenie::$(tail -n 6 verify.log | sed ':a;N;$!ba;s/\n/%0A/g')"
+          else
+            echo "::warning title=Overenie zlyhalo::$(tail -n 15 verify.log | sed ':a;N;$!ba;s/\n/%0A/g')"
+          fi
       - name: Klimatológia (raz denne)
         run: |
           set -o pipefail
