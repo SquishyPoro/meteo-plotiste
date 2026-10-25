@@ -1,0 +1,52 @@
+name: probe-sources
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe
+        run: |
+          set +e
+          mkdir out && cd out
+          pip install -q pygrib numpy openpyxl 2>&1 | tail -2
+          A=https://opendata.chmi.cz/meteorology/weather/nwp_aladin/CZ_1km
+          for r in 00 06 12 18; do echo "== $r"; curl -sS -m 60 "$A/$r/" | grep -o 'href="[^"]*"' | cut -d'"' -f2 | grep -v '\.\.' ; done > files.txt
+          curl -sS -m 60 -o popis.xlsx https://opendata.chmi.cz/meteorology/weather/nwp_aladin/Popis_obsahu.xlsx
+          python3 -c "
+          import openpyxl
+          wb = openpyxl.load_workbook('popis.xlsx')
+          with open('popis.txt','w') as f:
+            for ws in wb:
+              f.write('### ' + ws.title + '\n')
+              for row in ws.iter_rows(values_only=True):
+                if any(row): f.write(' | '.join('' if c is None else str(c) for c in row) + '\n')
+          "
+          R=$(ls -1 files.txt >/dev/null; grep -B0 "SURFTEMPERATURE" files.txt | tail -1)
+          RUNDIR=$(awk '/^== /{d=$2} /SURFTEMPERATURE/{print d}' files.txt | tail -1)
+          curl -sS -m 300 -o t.grb.bz2 "$A/$RUNDIR/$R" && bunzip2 t.grb.bz2
+          python3 -c "
+          import pygrib, numpy as np
+          g = pygrib.open('t.grb'); out = open('grib.txt','w')
+          msgs = list(g)
+          out.write(f'{len(msgs)} messages\n')
+          for m in msgs[:4] + msgs[-2:]:
+            out.write(str(m) + '\n')
+          m = msgs[0]
+          out.write(f'gridType={m.gridType} Ni={m.Ni} Nj={m.Nj}\n')
+          lats, lons = m.latlons()
+          out.write(f'lat {lats.min()}..{lats.max()} lon {lons.min()}..{lons.max()}\n')
+          d = (lats - 50.236) ** 2 + ((lons - 15.79) * np.cos(np.radians(50.236))) ** 2
+          j, i = np.unravel_index(d.argmin(), d.shape)
+          out.write(f'nearest {lats[j,i]} {lons[j,i]} idx {j} {i}\n')
+          out.write('values: ' + ' '.join(f'{x.forecastTime}:{x.values[j,i]:.2f}' for x in msgs[:30]) + '\n')
+          for k in ['parameterName','shortName','typeOfLevel','level','stepUnits','stepType','dataDate','dataTime','units']:
+            try: out.write(f'{k}={m[k]}\n')
+            except Exception as e: out.write(f'{k}: {e}\n')
+          "
+          rm -f t.grb popis.xlsx
+          cd .. && git init -q probe && cp out/* probe/ && cd probe
+          git config user.name probe && git config user.email probe@users.noreply.github.com
+          git add -A && git commit -qm probe
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" HEAD:refs/heads/probe-out
