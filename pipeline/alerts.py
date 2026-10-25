@@ -332,6 +332,8 @@ def main():
                 day = today + dt.timedelta(days=d)
                 t0 = dt.datetime.combine(day, dt.time(), TZ).timestamp()
                 days[d] = (day, prob_window(F, max(t0, now), t0 + 86400))
+                w_ = days[d][1]
+                log(f'{day}: ' + (', '.join(f'{k}={v:.2f}' for k, v in w_.items() if isinstance(v, float)) if w_ else 'bez dát'))
             names = {0: 'Dnes', 1: 'Zajtra'}
             for d, (day, w) in days.items():
                 if not w:
