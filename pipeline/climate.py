@@ -27,6 +27,8 @@ ELEMENTS = {  # prvok: (priečinok, funkcia v recent JSON)
     'SRA': ('precipitation', '06:00'), 'SCE': ('snow', '06:00'), 'Fmax': ('wind', '00:00'),
 }
 NORMAL = (1991, 2020)
+KEEP = os.path.join(ROOT, 'data', 'chmi-daily-11649.csv')  # priebežne uložené dni z recent/ (ČHMÚ drží len aktuálny mesiac)
+ERA = {'TMA': 'temperature_2m_max', 'TMI': 'temperature_2m_min', 'T': 'temperature_2m_mean', 'SRA': 'precipitation_sum'}
 
 
 def log(*a):
@@ -86,11 +88,61 @@ def add_recent(data, today):
         m = (m.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
 
 
+def keep_recent(data):
+    """Uloží dni novšie než história do data/chmi-daily-11649.csv a načíta skôr uložené."""
+    hist_end = {el: max(v) if v else dt.date(1900, 1, 1) for el, v in data.items()}
+    rows = {}
+    if os.path.exists(KEEP):
+        with open(KEEP, newline='') as f:
+            for r in csv.DictReader(f):
+                rows[(r['date'], r['element'])] = float(r['value'])
+    for el, vals in data.items():
+        for d, x in vals.items():
+            if d > hist_end.get(el, d):
+                rows[(d.isoformat(), el)] = x
+    for (ds, el), x in rows.items():
+        data.setdefault(el, {}).setdefault(dt.date.fromisoformat(ds), x)
+    with open(KEEP, 'w', newline='') as f:
+        w = csv.writer(f)
+        w.writerow(['date', 'element', 'value'])
+        for (ds, el) in sorted(rows):
+            w.writerow([ds, el, rows[(ds, el)]])
+
+
+def fill_gaps_era5(data, today):
+    """Chýbajúce dni (medzi koncom histórie a uloženými dňami) doplní reanalýza ERA5. Vráti množinu odhadnutých dní."""
+    have = set(data['TMA'])
+    first_missing, d = None, dt.date(today.year - 1, 1, 1)
+    while d < today - dt.timedelta(days=6):
+        if d not in have:
+            first_missing = d
+            break
+        d += dt.timedelta(days=1)
+    if not first_missing:
+        return set()
+    end = today - dt.timedelta(days=6)
+    url = ('https://archive-api.open-meteo.com/v1/archive?latitude=50.1776&longitude=15.8385&timezone=Europe%2FPrague'
+           f'&start_date={first_missing}&end_date={end}&daily=' + ','.join(ERA.values()))
+    j = json.loads(get(url))
+    est = set()
+    for i, ds in enumerate(j['daily']['time']):
+        day = dt.date.fromisoformat(ds)
+        if day in have:
+            continue
+        for el, var in ERA.items():
+            v = j['daily'][var][i]
+            if v is not None:
+                data[el][day] = float(v)
+        est.add(day)
+    log(f'ERA5 doplnil {len(est)} dní ({first_missing} – {end})')
+    return est
+
+
 def r1(x):
     return None if x is None else round(x, 1)
 
 
-def build(data, today):
+def build(data, today, est=frozenset()):
     T, TMA, TMI, SRA, SCE, FMAX = (data[k] for k in ('T', 'TMA', 'TMI', 'SRA', 'SCE', 'Fmax'))
     y0, y1 = NORMAL
     # --- normál 1991–2020 po mesiacoch
@@ -145,7 +197,8 @@ def build(data, today):
         pv = [x for d, x in SRA.items() if d.year == m.year and d.month == m.month]
         n = normals[m.month - 1]
         if tv:
-            months.append({'m': m.strftime('%Y-%m'), 'days': len(tv), 't': r1(sum(tv) / len(tv)),
+            ne = sum(1 for d in T if d.year == m.year and d.month == m.month and d in est)
+            months.append({'m': m.strftime('%Y-%m'), 'days': len(tv), 'est': ne, 't': r1(sum(tv) / len(tv)),
                            'ta': r1(sum(tv) / len(tv) - n['t']) if n['t'] is not None else None,
                            'p': r1(sum(pv)), 'pn': n['p']})
         m = (m.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
@@ -157,6 +210,7 @@ def build(data, today):
         return {'trop': sum(x >= 30 for x in mx), 'summer': sum(x >= 25 for x in mx),
                 'frost': sum(x < 0 for x in mn), 'ice': sum(x < 0 for x in mx), 'n': len(mx)}
     cur = counts(today.year)
+    cur['est'] = sum(1 for d in est if d.year == today.year)
     norm_years = [counts(y) for y in range(y0, y1 + 1)]
     norm_years = [c for c in norm_years if c['n'] > doy * 0.9]
     ncount = {k: r1(sum(c[k] for c in norm_years) / len(norm_years)) for k in ('trop', 'summer', 'frost', 'ice')} if norm_years else {}
@@ -180,7 +234,13 @@ def main():
     today = dt.datetime.now(dt.timezone.utc).date()
     data = load_history()
     add_recent(data, today)
-    res = build(data, today)
+    keep_recent(data)
+    try:
+        est = fill_gaps_era5(data, today)
+    except Exception as e:
+        log('ERA5 zlyhal:', e)
+        est = set()
+    res = build(data, today, est)
     with open(OUT, 'w') as f:
         json.dump(res, f, ensure_ascii=False, separators=(',', ':'))
     log('climate.json:', json.dumps(res['records'], ensure_ascii=False), json.dumps(res['year'], ensure_ascii=False))
