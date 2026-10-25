@@ -10,30 +10,18 @@ jobs:
         run: |
           set +e
           mkdir out && cd out
-          C=https://opendata.chmi.cz/meteorology
-          ls_() { curl -sS -m 60 "$1" | sed 's/<[^>]*>/ /g' | tr -s ' \n' | tail -c ${2:-1500}; echo; }
-          { echo "== alerts"; ls_ $C/weather/alerts/ 3000
-            for d in $(curl -sS -m 60 $C/weather/alerts/ | grep -o 'href="[^"]*/"' | cut -d'"' -f2 | grep -v '\.\.'); do echo "== alerts/$d"; ls_ "$C/weather/alerts/$d" 1500
-              for e in $(curl -sS -m 60 "$C/weather/alerts/$d" | grep -o 'href="[^"]*/"' | cut -d'"' -f2 | grep -v '\.\.' | tail -2); do echo "== alerts/$d$e"; ls_ "$C/weather/alerts/$d$e" 1200; done
-            done
-          } > alerts.txt 2>&1
-          F=$(curl -sS -m 60 $C/weather/alerts/ | grep -o 'href="[^"]*"' | cut -d'"' -f2 | grep -v '/$' | tail -1); echo "file: $F" >> alerts.txt
-          { echo "== aladin"; ls_ $C/weather/nwp_aladin/ 2000
-            for d in $(curl -sS -m 60 $C/weather/nwp_aladin/ | grep -o 'href="[^"]*/"' | cut -d'"' -f2 | grep -v '\.\.'); do echo "== $d"; ls_ "$C/weather/nwp_aladin/$d" 1500
-              for e in $(curl -sS -m 60 "$C/weather/nwp_aladin/$d" | grep -o 'href="[^"]*/"' | cut -d'"' -f2 | grep -v '\.\.' | tail -2); do echo "== $d$e"; ls_ "$C/weather/nwp_aladin/$d$e" 1500; done
-            done } > aladin.txt 2>&1
-          { echo "== historical_csv"; ls_ $C/climate/historical_csv/ 2000
-            for d in $(curl -sS -m 60 $C/climate/historical_csv/ | grep -o 'href="[^"]*/"' | cut -d'"' -f2 | grep -v '\.\.'); do echo "== $d"; ls_ "$C/climate/historical_csv/$d" 1200
-              for e in $(curl -sS -m 60 "$C/climate/historical_csv/$d" | grep -o 'href="[^"]*/"' | cut -d'"' -f2 | grep -v '\.\.' | head -3); do echo "== $d$e"; curl -sS -m 60 "$C/climate/historical_csv/$d$e" | grep -o 'href="[^"]*"' | grep -E '11649|11651|H3HRAD|H3SVOD' | head -10; done
-            done
-            echo "== recent daily 11649"; curl -sS -m 60 "$C/climate/recent/data/daily/dly-0-203-0-11649-$(date -u +%Y%m).json" | head -c 1500
-          } > hist.txt 2>&1
-          curl -sS -m 60 "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=50.236&longitude=15.79&current=european_aqi,pm10,pm2_5,ozone,nitrogen_dioxide&hourly=european_aqi,pm2_5,alder_pollen,birch_pollen,grass_pollen,mugwort_pollen,ragweed_pollen&forecast_days=2&timeformat=unixtime" | head -c 1500 > aq.json
-          curl -sS -m 60 "https://seasonal-api.open-meteo.com/v1/seasonal?latitude=50.236&longitude=15.79&weekly=temperature_2m_anomaly,precipitation_anomaly&forecast_days=45" | head -c 1500 > seasonal1.json
-          curl -sS -m 60 "https://seasonal-api.open-meteo.com/v1/seasonal?latitude=50.236&longitude=15.79&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&forecast_days=45&models=ecmwf_seas5" | head -c 1200 > seasonal2.json
-          curl -sS -m 60 "https://ensemble-api.open-meteo.com/v1/ensemble?latitude=50.236&longitude=15.79&daily=temperature_2m_mean&models=ecmwf_ifs025&forecast_days=35" | head -c 800 > ens35.json
-          curl -sS -m 60 "https://api.open-meteo.com/v1/forecast?latitude=50.236&longitude=15.79&hourly=snow_depth,snowfall,visibility,freezing_level_height,soil_temperature_0cm,soil_temperature_6cm,soil_moisture_0_to_1cm,et0_fao_evapotranspiration&forecast_hours=6&timeformat=unixtime" | head -c 1500 > extra.json
-          { for u in https://ws1.blitzortung.org/ https://map.blitzortung.org/GEOjson/getjson.php?f=s https://www.lightningmaps.org/ https://tiles.lightningmaps.org/; do echo "== $u"; curl -sS -m 20 -I -H "Origin: https://squishyporo.github.io" "$u" | grep -i "HTTP/\|access-control\|content-type"; done; } > lightning.txt 2>&1
+          C=https://opendata.chmi.cz/meteorology/weather/alerts/cap/
+          curl -sS -m 60 $C > list.html
+          python3 - <<'PY'
+          import re, datetime, urllib.request
+          html = open('list.html').read()
+          rows = re.findall(r'href="([^"]+\.xml)">[^<]*</a>\s+(\d\d-\w\w\w-\d{4} \d\d:\d\d)\s+(\d+)', html)
+          rows = sorted(rows, key=lambda r: datetime.datetime.strptime(r[1], '%d-%b-%Y %H:%M'))
+          open('cap-list.txt', 'w').write('\n'.join(' '.join(r) for r in rows[-15:]) + f'\ncount {len(rows)}\n')
+          for name, _, size in rows[-3:]:
+            open('cap-' + name, 'wb').write(urllib.request.urlopen('https://opendata.chmi.cz/meteorology/weather/alerts/cap/' + name).read())
+          PY
+          rm list.html
           cd .. && git init -q probe && cp out/* probe/ && cd probe
           git config user.name probe && git config user.email probe@users.noreply.github.com
           git add -A && git commit -qm probe
