@@ -181,6 +181,27 @@ def fetch_previous_runs(model, start, end):
     return out
 
 
+def aladin_archive():
+    """Archív behov ALADIN (data/aladin/*.json) v tvare ako previous runs: {(premenná, predstih_dni): {čas: hodnota}}."""
+    folder = os.path.join(DATA, 'aladin')
+    if not os.path.isdir(folder):
+        return None
+    out = {}
+    for name in sorted(os.listdir(folder)):  # podľa behu vzostupne – novší beh prepíše starší
+        with open(os.path.join(folder, name)) as f:
+            a = json.load(f)
+        run = a['run']
+        for i, t in enumerate(a['time']):
+            if t <= run:
+                continue
+            lead = (t - run - 1) // 86400
+            for key in ('t', 'g', 'p'):
+                v = a[key][i]
+                if v is not None:
+                    out.setdefault((key, lead), {})[t] = v
+    return out or None
+
+
 # ------------------------------------------------------------------ vyhodnotenie
 
 def weighted(pairs):
@@ -232,6 +253,10 @@ def evaluate(obs, today):
         if r:
             fc[m] = r
             log(f'{m}: {len(r)} sérií')
+    al = aladin_archive()
+    if al:
+        fc['aladin'] = al
+        log(f'aladin: {len(al)} sérií z archívu')
     if not fc:
         raise RuntimeError('žiadne historické predpovede')
 

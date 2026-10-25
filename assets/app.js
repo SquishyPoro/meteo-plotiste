@@ -16,6 +16,9 @@ const MODELS = [
   { id: 'gem_seamless',        name: 'Kanada GEM' },
 ];
 const ENS_MODELS = ['ecmwf_ifs025', 'icon_seamless', 'gfs025'];
+// modely mimo Open-Meteo (spracované cez GitHub Actions do data/*.json)
+const OWN_MODELS = [{ id: 'aladin', name: 'ČHMÚ ALADIN' }];
+const ALL_MODELS = [...MODELS, ...OWN_MODELS];
 // mriežka nad Európou (3° × 3°)
 const GRID = { lat0: 34, dlat: 3, nrow: 13, lon0: -24, dlon: 3, ncol: 24 };
 const STEP_H = 3, MAX_STEPS = 41; // 0 … 120 h
@@ -382,6 +385,17 @@ function deriveLocal(L) {
     }
   }
   return { cons, spread, band, pRain, days, ai, obs: state.obs && !state.demo.local ? obs : null };
+}
+
+/* ALADIN ČHMÚ (1 km, 72 h) z data/aladin.json – pridá sa ako ďalší model, ak beh nie je starší než 18 h */
+function mergeAladin() {
+  const A = state.aladin, L = state.local;
+  if (!L || state.demo.local) return;
+  delete L.models.aladin;
+  if (!A || Date.now() / 1000 - A.run > 18 * 3600) return;
+  const idx = new Map(A.time.map((t, i) => [t, i]));
+  const at = (k) => L.times.map((t) => { const i = idx.get(t); return i == null ? null : A[k][i]; });
+  L.models.aladin = { t: at('t'), p: at('p'), g: at('g') };
 }
 
 /* AI predpoveď: každý model opravený o svoju typickú chybu v Plotišti (podľa predstihu a hodiny dňa),
@@ -829,7 +843,7 @@ function obsLine() {
   return '';
 }
 
-const MODEL_NAME = Object.fromEntries(MODELS.map((m) => [m.id, m.name]));
+const MODEL_NAME = Object.fromEntries(ALL_MODELS.map((m) => [m.id, m.name]));
 
 function renderSkill() {
   const el = $('#skill');
@@ -1008,7 +1022,7 @@ function setupCharts() {
   charts.length = 0;
   const L = () => state.local, D = () => state.derived;
   const row = (a, b) => `<div class="r"><span>${a}</span><span>${b}</span></div>`;
-  const modelRows = (v, f) => MODELS.filter((mm) => L().models[mm.id]).map((mm) => row(mm.name, f(L().models[mm.id][v][crossIdx ?? 0]))).join('');
+  const modelRows = (v, f) => ALL_MODELS.filter((mm) => L().models[mm.id]).map((mm) => row(mm.name, f(L().models[mm.id][v][crossIdx ?? 0]))).join('');
   const line = (vals, x, y) => d3.line().defined((d) => d != null).x((_, i) => x(i)).y((d) => y(d)).curve(d3.curveMonotoneX)(vals);
   const area = (lo, hi, x, y) => d3.area().defined((_, i) => lo[i] != null && hi[i] != null).x((_, i) => x(i)).y0((_, i) => y(lo[i])).y1((_, i) => y(hi[i])).curve(d3.curveMonotoneX)(lo);
 
@@ -1231,6 +1245,11 @@ function precipMatrix(P) {
   const head = `<tr><th></th>${cols.map((c) => `<th>${localHour(c.t - 3600)}</th>`).join('')}</tr>`;
   const ids = HIRES.filter((m) => H.models[m.id]);
   const rows = ids.map((m) => `<tr><th class="m">${m.name}<small>${m.res}</small></th>${cols.map((c) => cell(H.models[m.id][c.i])).join('')}</tr>`);
+  const A = state.aladin;
+  if (A && Date.now() / 1000 - A.run < 18 * 3600) {
+    const ai = new Map(A.time.map((t, i) => [t, i]));
+    rows.unshift(`<tr><th class="m">ALADIN<small>ČHMÚ 1 km</small></th>${cols.map((c) => { const i = ai.get(c.t); return cell(i == null ? null : A.p[i]); }).join('')}</tr>`);
+  }
   // pravdepodobnosť z ensemble (hodinové časy z hlavnej predpovede)
   if (state.derived && state.local) {
     const li = new Map(state.local.times.map((t, i) => [t, i]));
@@ -2021,10 +2040,11 @@ async function load(force = false) {
     const d = await loadWinterLive(); cacheSet('mp-winter-v1', d); return d;
   });
   const own = (f) => fetchJSON(`data/${f}?v=${Math.floor(Date.now() / 600000)}`, 15000);
-  const [lr, gr, sk, ob, pr, wi] = await Promise.allSettled([getLocal(), getGrid(), own('skill.json'), own('obs-recent.json'), getPrecip(), getWinter()]);
+  const [lr, gr, sk, ob, pr, wi, al] = await Promise.allSettled([getLocal(), getGrid(), own('skill.json'), own('obs-recent.json'), getPrecip(), getWinter(), own('aladin.json')]);
   if (pr.status !== 'fulfilled') console.warn('Zrážky detailne – živé dáta zlyhali:', pr.reason);
   state.skill = sk.status === 'fulfilled' ? sk.value : null;
   state.obs = ob.status === 'fulfilled' ? ob.value : null;
+  state.aladin = al.status === 'fulfilled' ? al.value : null;
   state.demo.local = lr.status !== 'fulfilled';
   state.demo.grid = gr.status !== 'fulfilled';
   if (lr.status !== 'fulfilled') console.warn('Plotiště – živé dáta zlyhali:', lr.reason);
@@ -2032,6 +2052,7 @@ async function load(force = false) {
   state.local = lr.status === 'fulfilled' ? lr.value : demoLocal();
   state.precip = pr.status === 'fulfilled' ? pr.value : (state.demo.local ? demoPrecip() : null);
   state.grid = gr.status === 'fulfilled' ? gr.value : demoGrid();
+  mergeAladin();
   state.derived = deriveLocal(state.local);
   state.tracks = buildTracks(state.grid);
   state.step = Math.min(state.step, state.grid.times.length - 1);
