@@ -110,6 +110,11 @@ button { font: inherit; color: inherit; }
   .week .gu { display: none; }
 }
 
+.week .cs { margin-top: 2px; font: 600 11px var(--mono); padding: 1px 7px; border-radius: 9px; border: 1px solid currentColor; }
+.week .cs small { font-weight: 400; opacity: .7; }
+.week .cs[data-level="ok"] { color: var(--ok); }
+.week .cs[data-level="warn"] { color: var(--warn); }
+.week .cs[data-level="serious"] { color: var(--serious); }
 button.day { font: inherit; color: inherit; cursor: pointer; text-align: center; }
 button.day:hover { border-color: var(--accent); }
 

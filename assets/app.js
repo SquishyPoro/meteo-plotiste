@@ -2214,6 +2214,27 @@ function wxIcon(code, cloud) {
   return `<svg viewBox="0 0 24 25" width="34" height="34" aria-hidden="true">${body}</svg>`;
 }
 
+/* index pocitu počasia 1–10: začína na 10, body sa uberajú za teplotu mimo príjemného pásma, dážď, vietor a oblačnosť */
+function comfortScore({ tmax, tmin, rain, pp, gust, code }) {
+  const why = [];
+  let pen = 0;
+  const dt = Math.abs((tmax ?? 20) - 22);
+  const pt = Math.min(4, dt / 4);
+  if (pt >= 1) why.push((tmax ?? 20) < 22 ? tx('chladno', 'chladno') : tx('horúco', 'horko'));
+  pen += pt;
+  if (tmin != null && tmin < -5) { pen += 0.5; why.push(tx('silný mráz', 'silný mráz')); }
+  const pr = rain >= 10 ? 3.5 : rain >= 3 ? 2 : rain >= 0.5 ? 1 : 0;
+  pen += pr + (pp != null ? (pp / 100) * 0.8 : 0);
+  if (pr) why.push(rain >= 10 ? tx('veľa dažďa', 'hodně deště') : tx('dážď', 'déšť'));
+  const pg = gust >= 70 ? 2.5 : gust >= 50 ? 1.2 : gust >= 40 ? 0.6 : 0;
+  pen += pg; if (pg >= 1) why.push(tx('vietor', 'vítr'));
+  const pc = [0, 1].includes(code) ? 0 : code === 2 ? 0.4 : [3, 45, 48].includes(code) ? 1.3 : code >= 95 ? 1 : 0.6;
+  pen += pc; if ([3, 45, 48].includes(code)) why.push(code === 3 ? tx('zamračené', 'zataženo') : tx('hmla', 'mlha'));
+  if ([0, 1].includes(code)) why.unshift(tx('slnečno', 'slunečno'));
+  const sc = Math.max(1, Math.min(10, Math.round(10 - pen)));
+  return { sc, why, lvl: sc >= 7 ? 'ok' : sc >= 4 ? 'warn' : 'serious' };
+}
+
 function renderWeek() {
   const el = $('#week');
   const L = state.local, D = state.derived;
@@ -2233,6 +2254,7 @@ function renderWeek() {
     const rain = d.rainMed;
     const gust = di >= 0 ? dd.wind_gusts_10m_max[di] : null;
     const risky = (d.gust60 || 0) >= 0.4 || (d.storm || 0) >= 0.4 || (d.rain10 || 0) >= 0.5;
+    const cs = comfortScore({ tmax, tmin, rain, pp, gust, code });
     const name = k === 0 ? tx('Dnes', 'Dnes') : k === 1 ? tx('Zajtra', 'Zítra') : dayShort(d.t);
     const ch = changeOf(new Date(d.t * 1000).toLocaleDateString('sv-SE', { timeZone: TZ }));
     const dch = ch ? ch.tmax[0] - ch.tmax[1] : 0;
@@ -2241,7 +2263,8 @@ function renderWeek() {
       <div class="dn">${name}${badge}</div>${wxIcon(code)}
       <div class="tt"><b>${r0(tmax)}°</b><span>${r0(tmin)}°</span></div>
       <div class="pr${rain >= 0.5 ? ' wet' : ''}">${rain >= 0.5 ? `${r1(rain)} mm` : '–'}${pp != null && pp >= 20 ? ` · ${pp} %` : ''}</div>
-      <div class="gu">${gust != null ? `${tx('vietor', 'vítr')} ${r0(gust)}` : ''}</div></button>`;
+      <div class="gu">${gust != null ? `${tx('vietor', 'vítr')} ${r0(gust)}` : ''}</div>
+      <div class="cs" data-level="${cs.lvl}" title="${tx('Pocit počasia', 'Pocit počasí')} ${cs.sc}/10${cs.why.length ? ' – ' + cs.why.join(', ') : ''}">${cs.sc}<small>/10</small></div></button>`;
   }).join('');
   el.hidden = false;
   el.innerHTML = cards;
@@ -2271,6 +2294,8 @@ function openDay(k) {
       <div><dt>${tx('Nárazy max', 'Nárazy max')}</dt><dd>${r0(gmax)}<small>km/h</small></dd></div>
       <div><dt>${tx('Východ / západ', 'Východ / západ')}</dt><dd>${sun ? fmtTime.format(sun[0] * 1000) + ' / ' + fmtTime.format(sun[1] * 1000) : '–'}</dd></div>
     </dl>
+    ${(() => { const cs = comfortScore({ tmax: Math.max(...temps), tmin: Math.min(...temps), rain: rainSum, pp: di >= 0 && L.daily.precipitation_probability_max ? L.daily.precipitation_probability_max[di] : null, gust: gmax, code: di >= 0 ? L.daily.weather_code[di] : 2 });
+      return `<p class="dp-risk"><span class="chip" data-level="${cs.lvl}">${tx('POCIT POČASIA', 'POCIT POČASÍ')} ${cs.sc}/10</span>${cs.why.length ? ' ' + cs.why.join(', ') : ''}</p>`; })()}
     ${risks ? `<p class="dp-risk">${risks}</p>` : ''}
     <div class="pm-wrap"><table class="pm dp-table">
       <thead><tr><th></th>${hours}</tr></thead><tbody>
