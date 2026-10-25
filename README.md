@@ -25,3 +25,14 @@ GitHub Actions (`.github/workflows/update.yml`) každú hodinu spustí `pipeline
 Stránka z toho počíta **AI predpoveď**: každý model opraví o jeho typickú chybu v Plotišti (podľa predstihu a hodiny dňa)
 a spojí ich váženým priemerom, kde presnejšie modely majú väčšiu váhu. Panel „Presnosť modelov“ ukazuje,
 o koľko je AI za posledný týždeň lepšia alebo horšia než obyčajný priemer modelov.
+
+## Ďalšie funkcie
+
+- **Výstrahy ČHMÚ** pre ORP Hradec Králové (CAP) – pruh na dashboarde a notifikácie (`pipeline/alerts.py`, každých 10 min).
+- **PWA** – inštalácia na plochu, offline režim s poslednými dátami (`manifest.webmanifest`, `sw.js`).
+- **Záložky** v okne Plotiště: Predpoveď (vrátane zimného bloku a výhľadu na 6 týždňov), Ovzdušie (CAMS, peľ), Záhrada (pôda, výpar, zalievanie), Štatistiky (`pipeline/climate.py`, dáta ČHMÚ od 1897).
+- **Blesky** zo satelitu MTG (EUMETSAT) na radarovej mape a v upozorneniach.
+- **ALADIN ČHMÚ 1 km** – `pipeline/aladin.py` 4× denne, archív behov v `data/aladin/` na vyhodnotenie presnosti.
+- **Týždenný report** v nedeľu o 19:00.
+
+Upozornenia sa nastavujú v `alerts-config.json`.
