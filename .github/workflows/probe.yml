@@ -10,17 +10,18 @@ jobs:
         run: |
           set +e
           mkdir out && cd out
-          B=https://opendata.chmi.cz/meteorology/climate/now
+          R=https://opendata.chmi.cz/meteorology/climate/recent
+          curl -sS -m 60 $R/ | sed 's/<[^>]*>/ /g' | tr -s ' \n' > recent.txt
+          curl -sS -m 60 $R/data/ | sed 's/<[^>]*>/ /g' | tr -s ' \n' | head -c 3000 >> recent.txt
+          for d in $(curl -sS -m 60 $R/data/ | grep -o 'href="[^"]*/"' | cut -d'"' -f2 | grep -v '\.\.' | head -6); do echo "=== $d"; curl -sS -m 60 "$R/data/$d" | grep -o 'href="[^"]*"' | grep -E '11649|11651' | head -8; done >> recent.txt
+          N=https://opendata.chmi.cz/meteorology/climate/now/data
           D=$(date -u +%Y%m%d)
-          for m in meta1 meta2 meta3 meta4; do curl -sS -m 60 "$B/metadata/$m-$D.json" > $m.json; done
-          grep -h -i -E 'Hradec|11649|1164[05]|1165[156]|Plotiš' meta*.json > meta-hradec.txt
-          for m in meta2 meta3 meta4; do echo "=== $m"; head -c 2500 $m.json; echo; done > meta-heads.txt
-          grep -h -E '"(T|TPM|H|F|Fmax|D|SRA1H|P|SSV1H|SVH|SCE|Dmax|T05|TMA|TMI|SNO)"' meta2.json meta3.json meta4.json | head -60 > meta-elements.txt
-          curl -sS -m 60 "$B/data/1h-0-203-0-11649-$D.json" > hk1h.json
-          python3 -c "import json;d=json.load(open('hk1h.json'));v=d['data']['data']['values'];import collections;c=collections.Counter(x[1] for x in v);print(c);print([x for x in v if x[2]==max(y[2] for y in v)])" > hk1h-summary.txt 2>&1
-          curl -sS -m 60 "$B/data/10m-0-203-0-11649-$D.json" > hk10m.json
-          python3 -c "import json;d=json.load(open('hk10m.json'));v=d['data']['data']['values'];import collections;c=collections.Counter(x[1] for x in v);print(c);print([x for x in v if x[2]==max(y[2] for y in v)])" > hk10m-summary.txt 2>&1
-          rm -f meta1.json meta2.json meta3.json meta4.json hk1h.json hk10m.json
+          curl -sS -m 60 "$N/10m-0-203-0-11651-$D.json" > sd.json
+          python3 -c "import json,collections;v=json.load(open('sd.json'))['data']['data']['values'];print(collections.Counter(x[1] for x in v))" > svobodne-dvory.txt 2>&1
+          for m in ecmwf_ifs025 icon_seamless gfs_seamless meteofrance_seamless ukmo_seamless gem_seamless; do
+            echo "=== $m"; curl -sS -m 60 "https://previous-runs-api.open-meteo.com/v1/forecast?latitude=50.236&longitude=15.79&hourly=temperature_2m_previous_day1,temperature_2m_previous_day5,wind_gusts_10m_previous_day2,precipitation_previous_day2&models=$m&start_date=2026-07-01&end_date=2026-07-01&timezone=GMT" | head -c 700; echo
+          done > prevruns.txt
+          curl -sS -m 60 "https://previous-runs-api.open-meteo.com/v1/forecast?latitude=50.236&longitude=15.79&hourly=temperature_2m_previous_day1&models=ecmwf_ifs025&start_date=2025-01-01&end_date=2025-01-01" | head -c 400 >> prevruns.txt
           cd .. && git init -q probe && cp out/* probe/ && cd probe
           git config user.name probe && git config user.email probe@users.noreply.github.com
           git add -A && git commit -qm probe
