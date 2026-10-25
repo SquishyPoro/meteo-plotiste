@@ -12,12 +12,31 @@ jobs:
           mkdir out && cd out
           O="Origin: https://squishyporo.github.io"
           ls_() { curl -sS -m 60 "$1" | sed 's/<[^>]*>/ /g' | tr -s ' \n' | head -c ${2:-1500}; echo; }
-          Y=https://opendata.chmi.cz/hydrology
-          { echo "== hydro"; ls_ $Y/ ; ls_ $Y/now/ ; ls_ $Y/now/data/ 2500; ls_ $Y/now/metadata/ 1500; } > hydro.txt 2>&1
-          M=$(curl -sS -m 60 $Y/now/metadata/ | grep -o 'href="[^"]*json"' | cut -d'"' -f2 | head -3)
-          for f in $M; do echo "== $f"; curl -sS -m 60 "$Y/now/metadata/$f" | head -c 1500; echo; curl -sS -m 60 "$Y/now/metadata/$f" | grep -i -o '.\{200\}\(Hradec\|Předměřice\|Orlice\|Němčice\|Týniště\|Jaroměř\|Labe\).\{200\}' | head -20; done > hydro-meta.txt 2>&1
-          D=$(curl -sS -m 60 $Y/now/data/ | grep -o 'href="[^"]*"' | cut -d'"' -f2 | grep -v '/$\|\.\.' | head -3)
-          for f in $D; do echo "== $f"; curl -sS -m 60 "$Y/now/data/$f" | head -c 2500; echo; done > hydro-data.txt 2>&1
+          python3 - <<'PY'
+          import json, math, urllib.request
+          Y = 'https://opendata.chmi.cz/hydrology/now/'
+          g = lambda u: json.load(urllib.request.urlopen(u, timeout=60))
+          out = open('stations.txt', 'w')
+          m = g(Y + 'metadata/meta1.json')['data']['data']
+          h = m['header'].split(',')
+          near = []
+          for v in m['values']:
+            r = dict(zip(h, v))
+            d = math.hypot((r['GEOGR1'] - 50.236) * 111, (r['GEOGR2'] - 15.79) * 71)
+            if d < 30: near.append((d, r))
+          for d, r in sorted(near, key=lambda x: x[0]):
+            out.write(f"{d:5.1f} km {json.dumps(r, ensure_ascii=False)}\n")
+          for name in ('meta2.json', 'meta3.json'):
+            out.write('== ' + name + '\n' + json.dumps(g(Y + 'metadata/' + name), ensure_ascii=False)[:1500] + '\n')
+          for d, r in sorted(near, key=lambda x: x[0])[:5]:
+            try:
+              j = g(Y + 'data/' + r['objID'] + '.json')
+              for o in j['objList']:
+                for ts in o['tsList']:
+                  out.write(f"{r['STATION_NAME']} {ts['tsConID']} {ts.get('unit')} n={len(ts['tsData'])} last={ts['tsData'][-1] if ts['tsData'] else None}\n")
+            except Exception as e:
+              out.write(f"{r['objID']} ERR {e}\n")
+          PY
           cd .. && git init -q probe && cp out/* probe/ && cd probe
           git config user.name probe && git config user.email probe@users.noreply.github.com
           git add -A && git commit -qm probe
