@@ -1,0 +1,54 @@
+name: alerts
+on:
+  schedule:
+    - cron: '*/10 * * * *'   # každých 10 minút (GitHub môže spúšťanie o pár minút oneskoriť)
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'test = pošle skúšobnú notifikáciu, dry = len vypíše, čo by poslal'
+        type: choice
+        options: [normal, test, dry]
+        default: normal
+permissions:
+  contents: read
+concurrency:
+  group: alerts
+  cancel-in-progress: false
+jobs:
+  alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pipeline/requirements-alerts.txt
+      - run: pip install -q -r pipeline/requirements-alerts.txt
+      - name: Obnoviť stav upozornení
+        uses: actions/cache/restore@v4
+        with:
+          path: .alerts-state
+          key: alerts-state-${{ github.run_id }}
+          restore-keys: alerts-state-
+      - name: Kontrola a odoslanie
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          set -o pipefail
+          ARGS=""
+          [ "${{ inputs.mode }}" = "test" ] && ARGS="--test"
+          [ "${{ inputs.mode }}" = "dry" ] && ARGS="--dry --force"
+          if python pipeline/alerts.py $ARGS 2>&1 | tee run.log; then
+            echo "::notice title=Výsledok::$(tail -n 12 run.log | sed ':a;N;$!ba;s/\n/%0A/g')"
+          else
+            echo "::error title=Chyba::$(tail -n 25 run.log | sed ':a;N;$!ba;s/\n/%0A/g')"
+            exit 1
+          fi
+      - name: Uložiť stav upozornení
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .alerts-state
+          key: alerts-state-${{ github.run_id }}

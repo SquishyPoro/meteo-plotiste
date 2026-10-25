@@ -1,0 +1,20 @@
+{
+  "_info": "Nastavenia upozornení. true = zapnuté, false = vypnuté. Hodiny sú miestny čas.",
+  "rain_soon": true,
+  "rain_soon_minutes": 60,
+  "storm_nearby": true,
+  "wind": true,
+  "wind_kmh": 60,
+  "wind_prob": 0.5,
+  "heavy_rain": true,
+  "heavy_rain_mm": 15,
+  "heavy_rain_prob": 0.5,
+  "storms_forecast": true,
+  "storms_prob": 0.4,
+  "frost": true,
+  "frost_prob": 0.5,
+  "frost_hour": 18,
+  "morning": true,
+  "morning_hour": 6,
+  "quiet_hours": [22, 6]
+}
