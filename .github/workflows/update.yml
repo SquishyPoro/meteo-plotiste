@@ -1,0 +1,34 @@
+name: update-data
+on:
+  schedule:
+    - cron: '17 * * * *'   # každú hodinu (UTC); ČHMÚ zverejňuje dáta pár minút po celej hodine
+  workflow_dispatch:
+    inputs:
+      train:
+        description: 'Vynútiť pretrénovanie'
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Zber a vyhodnotenie
+        run: python pipeline/update.py ${{ inputs.train && '--train' || '' }}
+      - name: Uložiť dáta
+        run: |
+          git config user.name "meteo-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then echo "Žiadne zmeny"; exit 0; fi
+          git commit -m "Dáta $(date -u +'%Y-%m-%d %H:%M') UTC"
+          for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done
