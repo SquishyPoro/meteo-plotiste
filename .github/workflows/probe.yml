@@ -1,0 +1,21 @@
+name: probe-sources
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: CHMI open data listing
+        run: |
+          set +e
+          for u in https://opendata.chmi.cz/ https://opendata.chmi.cz/meteorology/ https://opendata.chmi.cz/meteorology/climate/ https://opendata.chmi.cz/meteorology/climate/now/ https://opendata.chmi.cz/meteorology/climate/now/data/ https://opendata.chmi.cz/meteorology/climate/now/metadata/; do
+            echo "=== $u"; curl -sS -m 30 "$u" | sed 's/<[^>]*>/ /g' | tr -s ' \n' | head -c 3000; echo
+          done
+          echo "=== search 11649 / Hradec"
+          curl -sS -m 60 https://opendata.chmi.cz/meteorology/climate/now/data/ | grep -o 'href="[^"]*"' | head -40
+          curl -sS -m 60 https://opendata.chmi.cz/meteorology/climate/now/data/ | grep -o 'href="[^"]*11649[^"]*"' | head -20
+      - name: METAR
+        run: |
+          curl -sS -m 30 "https://aviationweather.gov/api/data/metar?ids=LKPD,LKHK&format=json&hours=2" | head -c 1500; echo
+      - name: Open-Meteo previous runs
+        run: |
+          curl -sS -m 30 "https://previous-runs-api.open-meteo.com/v1/forecast?latitude=50.236&longitude=15.79&hourly=temperature_2m,temperature_2m_previous_day1&models=ecmwf_ifs025&past_days=2&forecast_days=1" | head -c 800; echo
