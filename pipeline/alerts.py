@@ -451,8 +451,11 @@ def main():
             if once(key):
                 t = lambda x: dt.datetime.fromisoformat(x).astimezone(TZ).strftime('%d.%m. %H:%M') if x else '?'
                 first = w['description'].split('\n')[0]
-                send(topic, f'ČHMÚ: {w["event"]}', f'{LEVEL_SK.get(w["level"], "")} výstraha pre Hradec Králové, {t(w["onset"])} – {t(w["expires"])}. {first}',
-                     'rotating_light' if w['level'] != 'yellow' else 'warning', {'yellow': 4, 'orange': 5, 'red': 5}.get(w['level'], 4), dry)
+                until = t(w['expires']) if w['expires'] else 'do odvolania'
+                slow = 'sucho' in w['event'].lower()  # dlhodobé výstrahy (sucho) nie sú naliehavé
+                prio = 3 if slow else {'yellow': 4, 'orange': 5, 'red': 5}.get(w['level'], 4)
+                send(topic, f'ČHMÚ: {w["event"]}', f'{LEVEL_SK.get(w["level"], "")} výstraha pre Hradec Králové, {t(w["onset"])} – {until}. {first}',
+                     'droplet' if slow else ('rotating_light' if w['level'] != 'yellow' else 'warning'), prio, dry)
                 sent[key] = now + 6 * 86400  # podržať v stave dlhšie, výstrahy trvajú aj niekoľko dní
     except Exception as e:
         log('výstrahy ČHMÚ zlyhali:', e)

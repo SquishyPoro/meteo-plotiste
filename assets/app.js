@@ -1649,7 +1649,7 @@ function renderWarnings() {
   const t = (x) => (x ? cap(fmtWarnTime.format(new Date(x))) : '?');
   el.innerHTML = list.map((w) => `<details class="warn" data-level="${esc(w.level)}">
     <summary><span class="lv">ČHMÚ · ${WARN_LEVEL[w.level] || ''}</span><span class="ev">${esc(w.event)}</span>
-      <span class="tm">${new Date(w.onset).getTime() > now ? tx('od', 'od') + ' ' + t(w.onset) + ' ' : ''}${tx('do', 'do')} ${t(w.expires)}</span></summary>
+      <span class="tm">${new Date(w.onset).getTime() > now ? tx('od', 'od') + ' ' + t(w.onset) + ' ' : ''}${w.expires ? tx('do', 'do') + ' ' + t(w.expires) : tx('platí do odvolania', 'platí do odvolání')}</span></summary>
     <div class="body">${w.description ? `<p>${esc(w.description)}</p>` : ''}${w.instruction ? `<p class="ins">${esc(w.instruction)}</p>` : ''}
       <a href="${esc(w.web || 'https://vystrahy-cr.chmi.cz/')}" target="_blank" rel="noopener">vystrahy-cr.chmi.cz ↗</a></div></details>`).join('');
 }
