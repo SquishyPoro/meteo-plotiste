@@ -100,7 +100,7 @@ def main():
         raise RuntimeError('nenašiel sa kompletný beh ALADIN')
     d, run = found
     base_time = dt.datetime.strptime(run, '%Y%m%d%H').replace(tzinfo=dt.timezone.utc)
-    if os.path.exists(OUT):
+    if os.path.exists(OUT) and '--force' not in os.sys.argv:
         with open(OUT) as f:
             if json.load(f).get('run') == int(base_time.timestamp()):
                 log(f'beh {run} už je spracovaný')
@@ -121,8 +121,8 @@ def main():
     t, g, p, c, fl = pick('t'), pick('g'), pick('p'), pick('cloud'), pick('flash')
     # kumulované zrážky -> hodinové úhrny (ak hodnoty klesnú, berieme ich ako hodinové)
     ps = [p.get(s) for s in steps]
-    cumulative = all(b is None or a is None or b >= a - 1e-6 for a, b in zip(ps, ps[1:]))
-    hourly_p = [None if v is None else round(max(0.0, (v - (ps[k - 1] or 0)) if cumulative and k else v), 2) for k, v in enumerate(ps)]
+    cumulative = all(b is None or a is None or b >= a - 0.05 for a, b in zip(ps, ps[1:]))  # tolerancia na šum float32
+    hourly_p = [0.0 if v is None and k == 0 else None if v is None else round(max(0.0, (v - (ps[k - 1] or 0)) if cumulative and k else v), 2) for k, v in enumerate(ps)]
     if cumulative:
         hourly_p[0] = 0.0
     cl = [c.get(s) for s in steps]
