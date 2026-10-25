@@ -1984,6 +1984,106 @@ TAB_RENDER.garden = async () => {
     <p class="foot">${tx('Výpar = referenčná evapotranspirácia FAO (trávnik). Zdroj: Open-Meteo, merania ČHMÚ.', 'Výpar = referenční evapotranspirace FAO (trávník). Zdroj: Open-Meteo, měření ČHMÚ.')}</p>`;
 };
 
+/* ------------------------------------------------------------------ ŠTATISTIKY A REKORDY (data/climate.json) */
+const MONTHS_SHORT = tx(['jan', 'feb', 'mar', 'apr', 'máj', 'jún', 'júl', 'aug', 'sep', 'okt', 'nov', 'dec'], ['led', 'úno', 'bře', 'dub', 'kvě', 'čer', 'čvc', 'srp', 'zář', 'říj', 'lis', 'pro']);
+const fmtDateLong = new Intl.DateTimeFormat(LOCALE, { day: 'numeric', month: 'numeric', year: 'numeric' });
+
+TAB_RENDER.stats = async () => {
+  const el = $('#pane-stats');
+  if (!state.climate) {
+    el.innerHTML = `<p class="empty">${tx('Načítavam štatistiky…', 'Načítám statistiky…')}</p>`;
+    try { state.climate = await fetchJSON(`data/climate.json?v=${Math.floor(Date.now() / 3600000)}`, 20000); }
+    catch { el.innerHTML = `<p class="empty">${tx('Štatistiky ešte nie sú pripravené.', 'Statistiky ještě nejsou připravené.')}</p>`; return; }
+  }
+  const C = state.climate;
+  const now = new Date();
+  const key = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const D = C.days[key] || {};
+  const fc = state.derived && state.derived.days && state.derived.days[0];
+  const fcTxt = fc && D.nmax != null && !state.demo.local
+    ? `<p class="skill-lead">${tx('Dnešné maximum podľa predpovede', 'Dnešní maximum podle předpovědi')} <b>${r0(fc.tmax)} °C</b> –
+       ${Math.abs(fc.tmax - D.nmax) < 1 ? tx('približne normálne.', 'přibližně normální.') : (fc.tmax > D.nmax ? tx(`o ${r0(fc.tmax - D.nmax)} °C nad normálom.`, `o ${r0(fc.tmax - D.nmax)} °C nad normálem.`) : tx(`o ${r0(D.nmax - fc.tmax)} °C pod normálom.`, `o ${r0(D.nmax - fc.tmax)} °C pod normálem.`))}</p>` : '';
+  const rec = (v, unit) => (v ? `${r1(v[0])} ${unit} <small>(${typeof v[1] === 'number' ? v[1] : fmtDateLong.format(new Date(v[1]))})</small>` : '–');
+  // tento mesiac
+  const curM = C.months[C.months.length - 1];
+  const dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const monthTxt = curM && curM.m === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` && curM.pn
+    ? `${tx('Tento mesiac zatiaľ', 'Tento měsíc zatím')}: ${tx('teplota', 'teplota')} <b>${curM.ta > 0 ? '+' : ''}${r1(curM.ta)} °C</b> ${tx('oproti normálu', 'oproti normálu')},
+       ${tx('zrážky', 'srážky')} <b>${r1(curM.p)} mm</b> = ${r0((curM.p / (curM.pn * curM.days / dim)) * 100)} % ${tx('normálu za rovnaké obdobie', 'normálu za stejné období')}.` : '';
+  const Y = C.year, yc = Y.cur, yn = Y.normal || {};
+  const yrow = (k, name, desc) => `<tr><th class="h">${name}<small>${desc}</small></th><td>${yc[k]}</td><td>${r0(yn[k])}</td></tr>`;
+  const anyEst = C.months.some((m) => m.est > 0) || yc.est > 0;
+  el.innerHTML = `<div class="block"><h3>${tx('Dnes v histórii', 'Dnes v historii')} · ${now.getDate()}. ${now.getMonth() + 1}.</h3>
+      <dl class="kv kv2">
+        <div><dt>${tx('Normál max / min', 'Normál max / min')}</dt><dd>${r1(D.nmax)} / ${r1(D.nmin)}<small>°C</small></dd></div>
+        <div><dt>${tx('Rekord najteplejšie', 'Rekord nejtepleji')}</dt><dd>${rec(D.hi, '°C')}</dd></div>
+        <div><dt>${tx('Rekord najchladnejšie', 'Rekord nejchladněji')}</dt><dd>${rec(D.lo, '°C')}</dd></div>
+        <div><dt>${tx('Najviac zrážok', 'Nejvíc srážek')}</dt><dd>${rec(D.p, 'mm')}</dd></div>
+      </dl>${fcTxt}${monthTxt ? `<p class="skill-lead">${monthTxt}</p>` : ''}</div>
+    <div class="chart" id="ch-anom"></div>
+    <div class="chart" id="ch-prec"></div>
+    <div class="block"><h3>${tx('Rok', 'Rok')} ${Y.y} ${tx('do dnešného dňa', 'do dnešního dne')}</h3>
+      <div class="risk-wrap"><table class="risk garden"><thead><tr><th></th><th>${Y.y}${yc.est ? '*' : ''}</th><th>${tx('normál', 'normál')}</th></tr></thead><tbody>
+        ${yrow('trop', tx('Tropické dni', 'Tropické dny'), 'max ≥ 30 °C')}${yrow('summer', tx('Letné dni', 'Letní dny'), 'max ≥ 25 °C')}
+        ${yrow('frost', tx('Mrazové dni', 'Mrazové dny'), 'min < 0 °C')}${yrow('ice', tx('Ľadové dni', 'Ledové dny'), 'max < 0 °C')}
+      </tbody></table></div>${yc.est ? `<div class="skill-note">* ${tx('z toho', 'z toho')} ${yc.est} ${tx('dní je odhad ERA5, kým ČHMÚ nezverejní merania', 'dní je odhad ERA5, dokud ČHMÚ nezveřejní měření')}</div>` : ''}</div>
+    <div class="block"><h3>${tx('Absolútne rekordy stanice', 'Absolutní rekordy stanice')}</h3>
+      <dl class="kv kv2">
+        <div><dt>${tx('Najvyššia teplota', 'Nejvyšší teplota')}</dt><dd>${rec(C.records.tmax, '°C')}</dd></div>
+        <div><dt>${tx('Najnižšia teplota', 'Nejnižší teplota')}</dt><dd>${rec(C.records.tmin, '°C')}</dd></div>
+        <div><dt>${tx('Najviac zrážok za deň', 'Nejvíc srážek za den')}</dt><dd>${rec(C.records.p, 'mm')}</dd></div>
+        <div><dt>${tx('Najvyššia snehová pokrývka', 'Nejvyšší sněhová pokrývka')}</dt><dd>${rec(C.records.snow, 'cm')}</dd></div>
+        <div><dt>${tx('Najsilnejší náraz vetra', 'Nejsilnější náraz větru')}</dt><dd>${C.records.gust ? `${r0(C.records.gust[0] * 3.6)} km/h <small>(${fmtDateLong.format(new Date(C.records.gust[1]))})</small>` : '–'}</dd></div>
+      </dl></div>
+    <p class="foot">${C.station}. ${tx('Teplota od', 'Teplota od')} ${C.since.t}, ${tx('zrážky od', 'srážky od')} ${C.since.p}. ${tx('Normál', 'Normál')} ${C.normal}.
+      ${anyEst ? tx('Svetlejšie stĺpce: ČHMÚ dáta za tieto mesiace ešte nezverejnilo, hodnoty sú odhad z reanalýzy ERA5 (do rekordov sa nepočítajú).', 'Světlejší sloupce: ČHMÚ data za tyto měsíce ještě nezveřejnil, hodnoty jsou odhad z reanalýzy ERA5 (do rekordů se nepočítají).') : ''}</p>`;
+  drawClimateCharts();
+};
+
+function drawClimateCharts() {
+  const C = state.climate; if (!C) return;
+  const M = C.months.slice(-13);
+  const bars = (id, title, val, color, refLine, unit, fmt) => {
+    const el = $(id); if (!el) return;
+    el.innerHTML = `<div class="chart-head"><h3>${title}</h3></div><svg></svg><div class="tip" hidden></div>`;
+    const W = el.clientWidth || 300, H = 130, m = { l: 34, r: 6, t: 10, b: 20 };
+    const vals = M.map(val);
+    const lo = Math.min(0, ...vals.filter((v) => v != null)), hi = Math.max(refLine || 0, ...vals.filter((v) => v != null));
+    const y = d3.scaleLinear().domain([lo, hi]).nice().range([H - m.b, m.t]);
+    const x = d3.scaleBand().domain(M.map((d) => d.m)).range([m.l, W - m.r]).padding(0.25);
+    const svg = d3.select(el).select('svg').attr('viewBox', `0 0 ${W} ${H}`).attr('height', H);
+    y.ticks(4).forEach((v) => {
+      svg.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(v)).attr('y2', y(v)).attr('stroke', v === 0 ? '#ffffff30' : '#ffffff0f');
+      svg.append('text').attr('x', m.l - 5).attr('y', y(v) + 3).attr('text-anchor', 'end').text(String(v).replace('.', ','));
+    });
+    if (refLine) {
+      svg.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(refLine)).attr('y2', y(refLine)).attr('stroke', '#dbe5f2').attr('stroke-dasharray', '4 3').attr('opacity', 0.6);
+      svg.append('text').attr('x', W - m.r).attr('y', y(refLine) - 4).attr('text-anchor', 'end').text(tx('normál', 'normál'));
+    }
+    const tip = el.querySelector('.tip');
+    M.forEach((d, i) => {
+      const v = vals[i]; if (v == null) return;
+      const y0 = y(Math.max(0, Math.min(v, 0) === v ? 0 : 0));
+      const top = Math.min(y(v), y(0)), h = Math.max(1.5, Math.abs(y(v) - y(0)));
+      svg.append('rect').attr('x', x(d.m)).attr('width', x.bandwidth()).attr('y', top).attr('height', h).attr('rx', 2)
+        .attr('fill', color(v)).attr('opacity', d.est > d.days / 2 ? 0.45 : 1)
+        .on('pointerenter', (ev) => {
+          const [mx] = d3.pointer(ev, svg.node());
+          tip.innerHTML = `<b>${MONTHS_SHORT[+d.m.slice(5) - 1]} ${d.m.slice(0, 4)}</b><hr>${fmt(d)}${d.est ? `<div class="r"><span>${tx('odhad ERA5', 'odhad ERA5')}</span><span>${d.est} ${tx('dní', 'dní')}</span></div>` : ''}`;
+          tip.hidden = false; tip.style.left = Math.min(mx + 10, W - 170) + 'px'; tip.style.top = '20px';
+        }).on('pointerleave', () => { tip.hidden = true; });
+      if (y0 == null) return;
+      const mo = +d.m.slice(5);
+      svg.append('text').attr('x', x(d.m) + x.bandwidth() / 2).attr('y', H - 5).attr('text-anchor', 'middle').text(mo === 1 ? d.m.slice(2, 4) + "'" : MONTHS_SHORT[mo - 1]);
+    });
+  };
+  const row = (a, b) => `<div class="r"><span>${a}</span><span>${b}</span></div>`;
+  bars('#ch-anom', tx('Teplota oproti normálu [°C] · 13 mesiacov', 'Teplota oproti normálu [°C] · 13 měsíců'), (d) => d.ta, (v) => (v >= 0 ? '#ff8a5c' : '#5fa8ff'), 0, '°C',
+    (d) => row(tx('priemer', 'průměr'), r1(d.t) + ' °C') + row(tx('odchýlka', 'odchylka'), (d.ta > 0 ? '+' : '') + r1(d.ta) + ' °C'));
+  bars('#ch-prec', tx('Zrážky v % normálu · 13 mesiacov', 'Srážky v % normálu · 13 měsíců'), (d) => (d.pn ? Math.round((d.p / (d.pn * d.days / new Date(+d.m.slice(0, 4), +d.m.slice(5), 0).getDate())) * 100) : null),
+    () => '#8f9cff', 100, '%', (d) => row(tx('úhrn', 'úhrn'), r1(d.p) + ' mm') + row(tx('normál', 'normál'), r1(d.pn) + ' mm'));
+}
+
 /* ------------------------------------------------------------------ VÝSTRAHY ČHMÚ (data/warnings.json z GitHub Actions) */
 const WARN_LEVEL = { yellow: tx('Žltá výstraha', 'Žlutá výstraha'), orange: tx('Oranžová výstraha', 'Oranžová výstraha'), red: tx('Červená výstraha', 'Červená výstraha') };
 const fmtWarnTime = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -2154,7 +2254,7 @@ function init() {
   });
 
   let rt = null;
-  new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { mapResize(); drawCharts(); drawPrecipChart(); if (state.tab === 'air') drawAqiChart(); }, 120); }).observe(document.body);
+  new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { mapResize(); drawCharts(); drawPrecipChart(); if (state.tab === 'air') drawAqiChart(); if (state.tab === 'stats') drawClimateCharts(); }, 120); }).observe(document.body);
 
   load().then(() => { if (state.tab && state.tab !== 'forecast') setTab(state.tab); });
   setInterval(() => load(), 30 * 60000); // automatická obnova každých 30 min

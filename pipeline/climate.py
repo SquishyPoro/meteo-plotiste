@@ -159,8 +159,9 @@ def build(data, today, est=frozenset()):
         normals.append({'t': r1(mean_of(T)), 'tmax': r1(mean_of(TMA)), 'tmin': r1(mean_of(TMI)),
                         'p': r1(sum(sums) / len(sums)) if sums else None})
     # --- denný normál (vyhladený ±7 dní) a rekordy pre každý deň v roku
+    meas = lambda src: {d: x for d, x in src.items() if d not in est}  # rekordy len z meraní, nie z odhadu ERA5
     days = {}
-    for src, key in ((TMA, 'tmax'), (TMI, 'tmin'), (SRA, 'p')):
+    for src, key in ((meas(TMA), 'tmax'), (meas(TMI), 'tmin'), (meas(SRA), 'p')):
         for d, x in src.items():
             days.setdefault(d.strftime('%m-%d'), {}).setdefault(key, []).append((x, d.year))
     by_day = {}
@@ -187,7 +188,7 @@ def build(data, today, est=frozenset()):
             return None
         d = fn(src, key=src.get)
         return [r1(src[d]), d.isoformat()]
-    records = {'tmax': extreme(TMA, max), 'tmin': extreme(TMI, min), 'p': extreme(SRA, max),
+    records = {'tmax': extreme(meas(TMA), max), 'tmin': extreme(meas(TMI), min), 'p': extreme(meas(SRA), max),
                'snow': extreme(SCE, max), 'gust': extreme(FMAX, max)}
     # --- posledných 24 mesiacov vs. normál
     months = []

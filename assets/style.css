@@ -337,6 +337,10 @@ table.pm tr.prob td.na { background: #0f1a2b; color: var(--dim); }
 .wrow[data-level="serious"] .k { color: var(--serious); }
 @media (max-width: 480px) { .wrow { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 
+/* štatistiky */
+.kv.kv2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.kv dd small { white-space: nowrap; }
+
 /* ovzdušie */
 .aq-now { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; align-items: center; }
 .aq-big { width: 84px; height: 84px; border-radius: 50%; border: 2px solid var(--ok); display: grid; place-content: center; text-align: center; }
