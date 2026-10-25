@@ -164,6 +164,7 @@ button { font: inherit; color: inherit; }
 .timeline {
   display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--line);
 }
+.timeline .btn { white-space: nowrap; }
 .timeline input[type=range] { flex: 1; min-width: 80px; accent-color: var(--accent); }
 .timeline .tl-label { font: 500 12px var(--mono); min-width: 150px; font-variant-numeric: tabular-nums; }
 .timeline .tl-label span { color: var(--muted); }
