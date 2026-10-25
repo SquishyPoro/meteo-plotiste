@@ -149,7 +149,7 @@ async function loadLocalLive() {
       ...base,
       current: 'temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,precipitation',
       hourly: 'pressure_msl',
-      daily: 'sunrise,sunset',
+      daily: 'sunrise,sunset,weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_gusts_10m_max',
     })),
     fetchJSON('https://api.open-meteo.com/v1/forecast?' + qs({
       ...base,
@@ -187,6 +187,7 @@ async function loadLocalLive() {
     ens: { t: members('temperature_2m'), p: members('precipitation'), g: members('wind_gusts_10m'), cape: members('cape') },
     current: { ...cur.current, pressure_trend: p3 },
     sun: cur.daily.sunrise.map((r, i) => [r, cur.daily.sunset[i]]),
+    daily: cur.daily,
     elevation: det.elevation,
   };
 }
@@ -2117,6 +2118,57 @@ async function renderOutlook() {
     <div class="skill-note">${tx('Dlhodobý výhľad ukazuje len trend – presnosť po 2. týždni rýchlo klesá. Zdroj: sezónny model cez Open-Meteo.', 'Dlouhodobý výhled ukazuje jen trend – přesnost po 2. týdnu rychle klesá. Zdroj: sezónní model přes Open-Meteo.')}</div>`;
 }
 
+/* ------------------------------------------------------------------ PREDPOVEĎ NA 7 DNÍ (pás pod hornou lištou) */
+// ikona podľa WMO kódu počasia: jednoduché čiarové SVG
+function wxIcon(code, cloud) {
+  const sun = '<circle cx="12" cy="12" r="4.2" fill="#ffc94d" stroke="none"/><g stroke="#ffc94d" stroke-width="1.6" stroke-linecap="round"><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5.3 5.3l1.7 1.7M17 17l1.7 1.7M5.3 18.7 7 17M17 7l1.7-1.7"/></g>';
+  const cl = (x = 0, y = 0, c = '#c9d6e8') => `<path transform="translate(${x} ${y})" d="M7.5 18.5h9.2a3.6 3.6 0 0 0 .4-7.2 5 5 0 0 0-9.6 1.3A3 3 0 0 0 7.5 18.5z" fill="#0e1727" stroke="${c}" stroke-width="1.5" stroke-linejoin="round"/>`;
+  const drops = (n, c = '#8f9cff') => Array.from({ length: n }, (_, i) => `<path d="M${8.5 + i * 3.5} 20.5l-1 2.2" stroke="${c}" stroke-width="1.6" stroke-linecap="round"/>`).join('');
+  const flakes = (n) => Array.from({ length: n }, (_, i) => `<circle cx="${8.5 + i * 3.5}" cy="21.6" r="1" fill="#e6f2ff"/>`).join('');
+  let body;
+  if (code === 0 || code === 1) body = sun;
+  else if (code === 2) body = `<g transform="translate(-3 -3) scale(.8)">${sun}</g>${cl(1.5, 0.5)}`;
+  else if (code === 3) body = cl(0, -1);
+  else if (code === 45 || code === 48) body = '<g stroke="#c9d6e8" stroke-width="1.6" stroke-linecap="round"><path d="M4 9h16M6 13h12M4 17h16"/></g>';
+  else if ([51, 53, 55, 56, 57].includes(code)) body = cl(0, -3) + drops(2);
+  else if ([61, 63, 80, 81, 66].includes(code)) body = cl(0, -3) + drops(3);
+  else if ([65, 82, 67].includes(code)) body = cl(0, -3) + drops(3, '#b9c4ff') + '<path d="M10 22.5l-.8 1.4M13.5 22.5l-.8 1.4" stroke="#b9c4ff" stroke-width="1.6" stroke-linecap="round"/>';
+  else if ([71, 73, 75, 77, 85, 86].includes(code)) body = cl(0, -3) + flakes(3);
+  else if (code >= 95) body = cl(0, -3) + '<path d="M12.5 15.5l-2.5 4h3l-2 4" fill="none" stroke="#ffe65a" stroke-width="1.7" stroke-linejoin="round"/>';
+  else body = cloud > 60 ? cl(0, -1) : `<g transform="translate(-3 -3) scale(.8)">${sun}</g>${cl(1.5, 0.5)}`;
+  return `<svg viewBox="0 0 24 25" width="34" height="34" aria-hidden="true">${body}</svg>`;
+}
+
+function renderWeek() {
+  const el = $('#week');
+  const L = state.local, D = state.derived;
+  if (!L || !D) { el.hidden = true; return; }
+  const dd = L.daily;
+  const now = Date.now() / 1000;
+  const ai = D.ai && D.ai.t;
+  const cards = D.days.slice(0, 7).map((d, k) => {
+    // max/min: AI predpoveď (ak je), inak priemer modelov, inak ensemble medián
+    const idx = L.times.map((t, i) => i).filter((i) => dateKey(L.times[i]) === d.key);
+    const src = ai && idx.some((i) => ai[i] != null) ? ai : D.cons.t;
+    const vals = idx.map((i) => src[i]).filter((x) => x != null);
+    const tmax = vals.length >= 18 ? Math.max(...vals) : d.tmax, tmin = vals.length >= 18 ? Math.min(...vals) : d.tmin;
+    const di = dd ? dd.time.findIndex((t) => dateKey(t) === d.key) : -1;
+    const code = di >= 0 ? dd.weather_code[di] : (d.rainMed >= 1 ? 61 : 2);
+    const pp = di >= 0 && dd.precipitation_probability_max ? dd.precipitation_probability_max[di] : null;
+    const rain = d.rainMed;
+    const gust = di >= 0 ? dd.wind_gusts_10m_max[di] : null;
+    const risky = (d.gust60 || 0) >= 0.4 || (d.storm || 0) >= 0.4 || (d.rain10 || 0) >= 0.5;
+    const name = k === 0 ? tx('Dnes', 'Dnes') : k === 1 ? tx('Zajtra', 'Zítra') : dayShort(d.t);
+    return `<div class="day${risky ? ' risky' : ''}" title="${WMO[code] || ''}">
+      <div class="dn">${name}</div>${wxIcon(code)}
+      <div class="tt"><b>${r0(tmax)}°</b><span>${r0(tmin)}°</span></div>
+      <div class="pr${rain >= 0.5 ? ' wet' : ''}">${rain >= 0.5 ? `${r1(rain)} mm` : '–'}${pp != null && pp >= 20 ? ` · ${pp} %` : ''}</div>
+      <div class="gu">${gust != null ? `${tx('vietor', 'vítr')} ${r0(gust)}` : ''}</div></div>`;
+  }).join('');
+  el.hidden = false;
+  el.innerHTML = cards;
+}
+
 /* ------------------------------------------------------------------ VÝSTRAHY ČHMÚ (data/warnings.json z GitHub Actions) */
 const WARN_LEVEL = { yellow: tx('Žltá výstraha', 'Žlutá výstraha'), orange: tx('Oranžová výstraha', 'Oranžová výstraha'), red: tx('Červená výstraha', 'Červená výstraha') };
 const fmtWarnTime = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -2157,8 +2209,8 @@ function setStatus() {
 async function load(force = false) {
   const st = $('#status'); st.dataset.state = 'loading'; st.querySelector('span').textContent = tx('Načítavam', 'Načítám');
   state.staleAt = null;
-  const getLocal = () => liveOrStale('mp-local-v1', 30, force, async () => {
-    const d = await loadLocalLive(); cacheSet('mp-local-v1', d); return d;
+  const getLocal = () => liveOrStale('mp-local-v2', 30, force, async () => {
+    const d = await loadLocalLive(); cacheSet('mp-local-v2', d); return d;
   });
   const reviveGrid = (c) => ({ ...c, P: c.P.map((a) => Float32Array.from(Object.values(a))), G: c.G.map((a) => Float32Array.from(Object.values(a))), R: c.R.map((a) => Float32Array.from(Object.values(a))), C: c.C.map((a) => Float32Array.from(Object.values(a))) });
   const getGrid = () => liveOrStale('mp-grid-v1', 60, force, async () => {
@@ -2191,7 +2243,7 @@ async function load(force = false) {
   state.step = Math.min(state.step, state.grid.times.length - 1);
 
   state.winter = wi.status === 'fulfilled' ? wi.value : null;
-  renderNow(); renderPrecip(); renderWinter(); renderSummary(); renderOutlook(); renderRisk(); renderSkill();
+  renderWeek(); renderNow(); renderPrecip(); renderWinter(); renderSummary(); renderOutlook(); renderRisk(); renderSkill();
   if (!charts.length) setupCharts();
   drawCharts();
   renderLegend(); renderTimeline(); renderSystems();

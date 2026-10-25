@@ -92,6 +92,24 @@ button { font: inherit; color: inherit; }
   padding: 7px 12px; border-radius: 3px; font-size: 12.5px;
 }
 
+/* ---------- predpoveď na 7 dní ---------- */
+.week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.week .day { display: grid; justify-items: center; gap: 2px; padding: 6px 4px 7px; border: 1px solid var(--line); border-radius: 4px;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel)); min-width: 0; }
+.week .day:first-child { border-color: #2a4a6a; }
+.week .day.risky { border-color: #5a4d1d; box-shadow: inset 0 2px 0 var(--warn); }
+.week .dn { font: 600 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+.week .day:first-child .dn { color: var(--accent); }
+.week .tt { display: flex; gap: 6px; align-items: baseline; font-variant-numeric: tabular-nums; }
+.week .tt b { font: 500 20px/1 var(--display); }
+.week .tt span { font: 500 15px/1 var(--display); color: var(--muted); }
+.week .pr, .week .gu { font: 10.5px var(--mono); color: var(--dim); white-space: nowrap; }
+.week .pr.wet { color: #aab4ff; }
+@media (max-width: 700px) {
+  .week { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 74px; overflow-x: auto; padding-bottom: 2px; }
+  .week .gu { display: none; }
+}
+
 /* ---------- výstrahy ČHMÚ ---------- */
 .warnings { display: grid; gap: 6px; }
 .warn { border: 1px solid var(--line); border-left: 4px solid var(--warn); border-radius: 3px; background: #15140c; }
