@@ -80,17 +80,24 @@
     <section class="win" id="win-local" aria-label="Plotiště nad Labem">
       <div class="win-head">
         <h2>Plotiště n. L.</h2>
-        <span class="sub" data-cs="10 modelů · 3 ensemble · měření ČHMÚ">10 modelov · 3 ensemble · merania ČHMÚ</span>
         <span class="spacer"></span>
+        <div class="seg tabs" role="tablist" aria-label="Záložky" id="tab-seg">
+          <button type="button" role="tab" data-tab="forecast" aria-pressed="true" data-cs="Předpověď">Predpoveď</button>
+          <button type="button" role="tab" data-tab="air" aria-pressed="false" data-cs="Ovzduší">Ovzdušie</button>
+          <button type="button" role="tab" data-tab="garden" aria-pressed="false" data-cs="Zahrada">Záhrada</button>
+          <button type="button" role="tab" data-tab="stats" aria-pressed="false" data-cs="Statistiky">Štatistiky</button>
+        </div>
         <button class="max-btn" type="button" data-max="local" aria-label="Zväčšiť okno Plotiště" title="Zväčšiť / zmenšiť (Esc)" data-cs-aria="Zvětšit okno Plotiště" data-cs-title="Zvětšit / zmenšit (Esc)">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/></svg>
         </button>
       </div>
       <div class="local-body">
+       <div class="tab-pane" data-pane="forecast">
         <div class="local-side">
           <div class="now" id="now"></div>
           <dl class="kv" id="now-kv"></dl>
           <div class="block precip" id="precip"></div>
+          <div class="block winter" id="winter" hidden></div>
           <div class="summary" id="summary"></div>
           <div class="block">
             <h3 data-cs="Pravděpodobnost jevů (ensemble, 7 dní)">Pravdepodobnosť javov (ensemble, 7 dní)</h3>
@@ -112,6 +119,10 @@
             ensemble ECMWF ENS, ICON-EPS, GEFS. Merania: ČHMÚ, stanica Hradec Králové – Svobodné Dvory
             (záloha Nový Hradec Králové). Radar: RainViewer. Obrysy máp: Natural Earth.</p>
         </div>
+       </div>
+       <div class="tab-pane" data-pane="air" id="pane-air" hidden></div>
+       <div class="tab-pane" data-pane="garden" id="pane-garden" hidden></div>
+       <div class="tab-pane" data-pane="stats" id="pane-stats" hidden></div>
       </div>
     </section>
   </main>

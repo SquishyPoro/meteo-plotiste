@@ -26,6 +26,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { height: 100%; }
 body {
   margin: 0;
@@ -216,7 +217,8 @@ button { font: inherit; color: inherit; }
   flex: 1; min-height: 0; overflow-y: auto; padding: 12px;
   display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-content: start;
 }
-.windows[data-max="local"] .local-body {
+.tab-pane { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-content: start; min-width: 0; }
+.windows[data-max="local"] .tab-pane[data-pane="forecast"] {
   grid-template-columns: minmax(0, 460px) minmax(0, 1fr); align-items: start;
 }
 .windows[data-max="local"] .local-side { position: sticky; top: 0; }
@@ -260,6 +262,11 @@ table.risk td[data-level="warn"] { background: #3a3415; color: #f3df86; }
 table.risk td[data-level="serious"] { background: #47250f; color: #ffc08f; }
 table.risk td[data-level="crit"] { background: #4d1219; color: #ffb3ba; font-weight: 600; }
 table.risk td[data-level="low"] { color: var(--muted); }
+table.risk.garden td { color: var(--fg); background: #0f1a2b; }
+table.risk.garden th { text-align: left; }
+table.risk.garden td[data-level="warn"] { background: #3a3415; color: #f3df86; }
+table.risk.garden td[data-level="crit"] { background: #4d1219; color: #ffb3ba; }
+table.risk.garden td[data-level="low"] { color: var(--dim); }
 .risk-key { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; font: 10.5px var(--mono); color: var(--muted); }
 .risk-key span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
 
@@ -319,6 +326,27 @@ table.pm tr.prob td.na { background: #0f1a2b; color: var(--dim); }
 .radar-note { margin-top: 5px; font: 10.5px var(--mono); color: var(--dim); }
 .map-legend .keys.rk span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
 
+/* zimný balík */
+.winter { border: 1px solid var(--line); border-radius: 3px; padding: 10px 12px; background: #0b1424; display: grid; gap: 6px; }
+.winter h3 { margin: 0 0 2px; }
+.wrow { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; align-items: baseline; font-size: 13px; }
+.wrow .k { font: 600 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.wrow .v b { font-family: var(--mono); font-weight: 500; }
+.wrow[data-level="warn"] .k { color: var(--warn); }
+.wrow[data-level="serious"] .k { color: var(--serious); }
+@media (max-width: 480px) { .wrow { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+
+/* ovzdušie */
+.aq-now { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; align-items: center; }
+.aq-big { width: 84px; height: 84px; border-radius: 50%; border: 2px solid var(--ok); display: grid; place-content: center; text-align: center; }
+.aq-big[data-level="warn"] { border-color: var(--warn); }
+.aq-big[data-level="serious"] { border-color: var(--serious); }
+.aq-big[data-level="crit"] { border-color: var(--crit); }
+.aq-big .n { font: 500 30px/1 var(--display); }
+.aq-big .l { font: 9px var(--mono); color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+.aq-adv { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+.chip[data-level="crit"] { color: var(--crit); }
+
 /* presnosť modelov */
 .skill-lead { font-size: 12.5px; margin: 0 0 8px; max-width: 65ch; }
 .skill-lead b { font-family: var(--mono); font-weight: 500; }
@@ -354,7 +382,9 @@ table.skill .w i { display: inline-block; height: 6px; border-radius: 1px; backg
   .map-legend .keys:not(.rk) { display: none; }
   .map-readout { right: 10px; font-size: 10.5px; }
   .windows[data-max="europe"] .map-wrap { height: 78vh; }
-  .windows[data-max="local"] .local-body { grid-template-columns: minmax(0, 1fr); }
+  .windows[data-max="local"] .tab-pane[data-pane="forecast"] { grid-template-columns: minmax(0, 1fr); }
+  .tabs { order: 5; width: 100%; }
+  .tabs button { flex: 1; }
   .local-body { overflow: visible; }
   .map-legend { width: 150px; }
   .brand small { display: none; }

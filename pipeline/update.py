@@ -37,7 +37,7 @@ BACKFILL_DAYS = 45           # prvé spustenie: koľko dní meraní skúsiť sti
 TRAIN_DAYS = 60              # okno na vyhodnotenie modelov
 HALF_LIFE_DAYS = 14          # novšie dni majú väčšiu váhu
 TEST_DAYS = 7                # posledné dni na férové porovnanie AI vs. priemer modelov
-FIELDS = ['time', 't', 'rh', 'wind', 'gust', 'dir', 'precip']
+FIELDS = ['time', 't', 'rh', 'wind', 'gust', 'dir', 'precip', 'tpm', 't05', 't10', 't20', 't50', 't100']  # tpm = teplota 5 cm nad zemou (min.), t05… = pôda
 
 
 def log(*a):
@@ -98,6 +98,7 @@ def hourly_from_10min(raw, day):
             't': at('T'), 'rh': at('H'),
             'wind': None if at('F') is None else at('F') * 3.6,
             'gust': agg('Fmax', max), 'dir': at('D'), 'precip': agg('SRA10M', sum),
+            'tpm': agg('TPM', min), 't05': at('T05'), 't10': at('T10'), 't20': at('T20'), 't50': at('T50'), 't100': at('T100'),
         }
         if row['gust'] is not None:
             row['gust'] *= 3.6
@@ -112,7 +113,7 @@ def load_obs(wsi):
     if os.path.exists(path):
         with open(path, newline='') as f:
             for r in csv.DictReader(f):
-                rows[int(r['time'])] = {k: (float(r[k]) if r[k] not in ('', None) else None) for k in FIELDS[1:]}
+                rows[int(r['time'])] = {k: (float(r[k]) if r.get(k) not in ('', None) else None) for k in FIELDS[1:]}
     return rows
 
 

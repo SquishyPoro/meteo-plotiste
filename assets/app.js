@@ -1650,6 +1650,252 @@ async function refreshRadar() {
   if (state.precip) renderPrecip();
 }
 
+/* ------------------------------------------------------------------ ZÁLOŽKY v okne Plotiště */
+const TAB_RENDER = {}; // záložka -> funkcia, ktorá ju vykreslí (načíta dáta pri prvom otvorení)
+function setTab(tab) {
+  state.tab = tab;
+  try { localStorage.setItem('mp-tab', tab); } catch { /* nevadí */ }
+  document.querySelectorAll('#tab-seg button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.tab === tab));
+  document.querySelectorAll('.tab-pane').forEach((p) => { p.hidden = p.dataset.pane !== tab; });
+  if (tab === 'forecast') requestAnimationFrame(() => { drawCharts(); drawPrecipChart(); });
+  else if (TAB_RENDER[tab]) TAB_RENDER[tab]();
+}
+
+/* ------------------------------------------------------------------ ZIMNÝ BALÍK: sneh, poľadovica, hmla, nulová izoterma */
+async function loadWinterLive() {
+  return fetchJSON('https://api.open-meteo.com/v1/forecast?' + qs({
+    latitude: HK.lat, longitude: HK.lon, timezone: TZ, timeformat: 'unixtime', forecast_hours: 72,
+    hourly: 'temperature_2m,relative_humidity_2m,precipitation,snowfall,snow_depth,visibility,freezing_level_height,weather_code,soil_temperature_0cm',
+  }));
+}
+
+// súvislé úseky hodín, kde platí podmienka -> „Ut 05–09“
+function periods(times, ok) {
+  const out = [];
+  let a = null;
+  times.forEach((t, i) => {
+    if (ok(i)) { if (a == null) a = i; }
+    else if (a != null) { out.push([a, i - 1]); a = null; }
+  });
+  if (a != null) out.push([a, times.length - 1]);
+  return out;
+}
+const fmtPeriod = (times, [a, b]) => `${dayShort(times[a] - 3600)} ${fmtTime.format((times[a] - 3600) * 1000)}–${fmtTime.format(times[b] * 1000)}`;
+
+function renderWinter() {
+  const el = $('#winter');
+  const W = state.winter;
+  if (!W || !W.hourly) { el.hidden = true; return; }
+  const h = W.hourly, T = h.time, now = Date.now() / 1000;
+  const idx = T.map((t, i) => i).filter((i) => T[i] > now);
+  const pick = (k) => idx.map((i) => h[k][i]);
+  const times = idx.map((i) => T[i]);
+  const v = (k, j) => h[k][idx[j]];
+  const rows = [];
+  // sneh
+  const snow48 = pick('snowfall').slice(0, 48).reduce((s, x) => s + (x || 0), 0);
+  const depth = pick('snow_depth').map((x) => (x || 0) * 100);
+  const depthMax = Math.max(0, ...depth.slice(0, 48));
+  if (snow48 >= 0.2 || depthMax >= 0.5) {
+    const sp = periods(times, (j) => (v('snowfall', j) || 0) >= 0.1).slice(0, 3);
+    rows.push(['warn', tx('Sneh', 'Sníh'), tx(`nový sneh <b>${r1(snow48)} cm</b> za 48 h`, `nový sníh <b>${r1(snow48)} cm</b> za 48 h`)
+      + (depthMax >= 0.5 ? tx(`, pokrývka až <b>${r0(depthMax)} cm</b>`, `, pokrývka až <b>${r0(depthMax)} cm</b>`) : '')
+      + (sp.length ? ` · ${sp.map((p) => fmtPeriod(times, p)).join(', ')}` : '')]);
+  }
+  // mrznúci dážď / poľadovica: zrážky pri mrznúcej zemi alebo kódy mrznúceho dažďa
+  const ice = periods(times, (j) => {
+    const p = v('precipitation', j) || 0, wc = v('weather_code', j), soil = v('soil_temperature_0cm', j), t = v('temperature_2m', j);
+    return p >= 0.1 && ([56, 57, 66, 67].includes(wc) || (soil != null && soil <= 0 && t != null && t > -1 && (v('snowfall', j) || 0) < p * 0.5));
+  });
+  if (ice.length) rows.push(['serious', tx('Poľadovica', 'Náledí'), tx('riziko mrznúceho dažďa alebo poľadovice: ', 'riziko mrznoucího deště nebo náledí: ') + ice.slice(0, 3).map((p) => `<b>${fmtPeriod(times, p)}</b>`).join(', ')]);
+  // námraza / zľadovatené cesty bez zrážok
+  const rime = periods(times, (j) => (v('soil_temperature_0cm', j) ?? 9) <= 0 && (v('relative_humidity_2m', j) || 0) >= 95 && (v('precipitation', j) || 0) < 0.1);
+  if (rime.length) rows.push(['warn', tx('Námraza', 'Námraza'), tx('mrznúci povrch pri vysokej vlhkosti: ', 'zamrzlý povrch při vysoké vlhkosti: ') + rime.slice(0, 3).map((p) => fmtPeriod(times, p)).join(', ')]);
+  // hmla
+  const fog = periods(times, (j) => (v('visibility', j) ?? 1e5) < 1000).slice(0, 3);
+  if (fog.length) {
+    const minVis = Math.min(...fog.flatMap(([a, b]) => idx.slice(a, b + 1).map((i) => h.visibility[i])));
+    rows.push(['warn', tx('Hmla', 'Mlha'), fog.map((p) => fmtPeriod(times, p)).join(', ') + tx(` · dohľadnosť až <b>${r0(minVis)} m</b>`, ` · dohlednost až <b>${r0(minVis)} m</b>`)]);
+  }
+  // nulová izoterma (24 h)
+  const fl = pick('freezing_level_height').slice(0, 24).filter((x) => x != null);
+  const month = new Date().getMonth() + 1;
+  const season = month >= 10 || month <= 4;
+  if (fl.length && (season || rows.length)) {
+    rows.push(['', tx('Nulová izoterma', 'Nulová izoterma'), `<b>${r0(Math.min(...fl) / 100) * 100}–${r0(Math.max(...fl) / 100) * 100} m</b> n. m. ${tx('(Plotiště leží ~230 m)', '(Plotiště leží ~230 m)')}`]);
+  }
+  const tmin = Math.min(...pick('temperature_2m').slice(0, 48).filter((x) => x != null));
+  if (season && !rows.some((r) => r[1] === tx('Sneh', 'Sníh'))) rows.unshift(['', tx('Sneh', 'Sníh'), tx('v najbližších 48 h sa nečaká', 'v nejbližších 48 h se neočekává')]);
+  el.hidden = !(season || rows.length > 1);
+  el.innerHTML = `<h3>${tx('Zima · najbližších 72 h', 'Zima · nejbližších 72 h')}</h3>` + rows.map(([lvl, k, val]) => `<div class="wrow" data-level="${lvl}"><span class="k">${k}</span><span class="v">${val}</span></div>`).join('')
+    + `<div class="skill-note">${tx('Minimálna teplota do 48 h', 'Minimální teplota do 48 h')}: ${r1(tmin)} °C · Open-Meteo (ICON-D2 / ICON-EU)</div>`;
+}
+
+/* ------------------------------------------------------------------ OVZDUŠIE A PEĽ (Open-Meteo Air Quality, CAMS) */
+const AQI_CLASSES = [ // Európsky index kvality ovzdušia (EEA)
+  { max: 20, name: tx('dobrá', 'dobrá'), level: 'ok', advice: tx('Ideálne na pobyt a šport vonku.', 'Ideální pro pobyt a sport venku.') },
+  { max: 40, name: tx('prijateľná', 'přijatelná'), level: 'ok', advice: tx('Vhodné na šport vonku.', 'Vhodné pro sport venku.') },
+  { max: 60, name: tx('stredná', 'střední'), level: 'warn', advice: tx('Citliví ľudia by mali obmedziť dlhú námahu vonku.', 'Citliví lidé by měli omezit dlouhou námahu venku.') },
+  { max: 80, name: tx('zlá', 'špatná'), level: 'serious', advice: tx('Obmedz intenzívny šport vonku.', 'Omez intenzivní sport venku.') },
+  { max: 100, name: tx('veľmi zlá', 'velmi špatná'), level: 'crit', advice: tx('Vyhni sa námahe vonku, vetraj krátko.', 'Vyhni se námaze venku, větrej krátce.') },
+  { max: 1e9, name: tx('extrémne zlá', 'extrémně špatná'), level: 'crit', advice: tx('Zostaň radšej vnútri.', 'Zůstaň raději uvnitř.') },
+];
+const aqiClass = (v) => AQI_CLASSES.find((c) => v <= c.max) || AQI_CLASSES[AQI_CLASSES.length - 1];
+const POLLEN = [ // prahy zrn/m³: nízka / stredná / vysoká
+  { key: 'alder_pollen', name: tx('Jelša', 'Olše'), th: [1, 15, 90] },
+  { key: 'birch_pollen', name: tx('Breza', 'Bříza'), th: [1, 15, 90] },
+  { key: 'grass_pollen', name: tx('Trávy', 'Trávy'), th: [1, 20, 50] },
+  { key: 'mugwort_pollen', name: tx('Palina', 'Pelyněk'), th: [1, 10, 30] },
+  { key: 'ragweed_pollen', name: tx('Ambrózia', 'Ambrózie'), th: [1, 5, 20] },
+];
+const POLLEN_LV = [['', '–'], ['ok', tx('nízka', 'nízká')], ['warn', tx('stredná', 'střední')], ['serious', tx('vysoká', 'vysoká')]];
+
+async function loadAirLive() {
+  return fetchJSON('https://air-quality-api.open-meteo.com/v1/air-quality?' + qs({
+    latitude: HK.lat, longitude: HK.lon, timezone: TZ, timeformat: 'unixtime', forecast_days: 4,
+    current: 'european_aqi,pm10,pm2_5,ozone,nitrogen_dioxide,sulphur_dioxide',
+    hourly: 'european_aqi,pm2_5,pm10,ozone,nitrogen_dioxide,' + POLLEN.map((p) => p.key).join(','),
+  }));
+}
+
+TAB_RENDER.air = async () => {
+  const el = $('#pane-air');
+  if (!state.air) {
+    el.innerHTML = `<p class="empty">${tx('Načítavam kvalitu ovzdušia…', 'Načítám kvalitu ovzduší…')}</p>`;
+    try {
+      state.air = await liveOrStale('mp-air-v1', 60, false, async () => { const d = await loadAirLive(); cacheSet('mp-air-v1', d); return d; });
+    } catch (e) {
+      el.innerHTML = `<p class="empty">${tx('Kvalitu ovzdušia sa nepodarilo načítať.', 'Kvalitu ovzduší se nepodařilo načíst.')}</p>`;
+      return;
+    }
+  }
+  const A = state.air, c = A.current, h = A.hourly;
+  const cls = aqiClass(c.european_aqi ?? 0);
+  // denné maximá peľu
+  const days = new Map();
+  h.time.forEach((t, i) => { const k = dateKey(t); if (!days.has(k)) days.set(k, { t, i: [] }); days.get(k).i.push(i); });
+  const dl = [...days.values()].slice(0, 4);
+  const anyPollen = POLLEN.some((p) => (h[p.key] || []).some((v) => v > 0));
+  const plv = (p, v) => (v == null ? 0 : v >= p.th[2] ? 3 : v >= p.th[1] ? 2 : v >= p.th[0] ? 1 : 0);
+  const pollenRows = POLLEN.map((p) => `<tr><th class="h" scope="row">${p.name}</th>${dl.map((d) => {
+    const vals = d.i.map((i) => (h[p.key] || [])[i]).filter((x) => x != null);
+    const mx = vals.length ? Math.max(...vals) : null;
+    const [lvl, name] = POLLEN_LV[plv(p, mx)];
+    return `<td data-level="${lvl === 'ok' ? 'low' : lvl}" title="${mx == null ? '' : r0(mx) + ' zŕn/m³'}">${name}</td>`;
+  }).join('')}</tr>`).join('');
+  const comp = [['PM2,5', c.pm2_5, 'µg/m³'], ['PM10', c.pm10, 'µg/m³'], ['O₃', c.ozone, 'µg/m³'], ['NO₂', c.nitrogen_dioxide, 'µg/m³'], ['SO₂', c.sulphur_dioxide, 'µg/m³']];
+  el.innerHTML = `<div class="aq-now">
+      <div class="aq-big" data-level="${cls.level}"><span class="n">${r0(c.european_aqi)}</span><span class="l">${tx('Európsky index', 'Evropský index')}</span></div>
+      <div><div class="desc">${tx('Kvalita ovzdušia', 'Kvalita ovzduší')}: <span class="chip" data-level="${cls.level}">${cls.name.toUpperCase()}</span></div>
+        <p class="aq-adv">${cls.advice}</p></div></div>
+    <dl class="kv">${comp.map(([k, v, u]) => `<div><dt>${k}</dt><dd>${r0(v)}<small>${u}</small></dd></div>`).join('')}<div><dt>${tx('Čas', 'Čas')}</dt><dd>${fmtTime.format(c.time * 1000)}</dd></div></dl>
+    <div class="chart" id="ch-aqi"></div>
+    <div class="block"><h3>${tx('Peľ · denné maximum', 'Pyl · denní maximum')}</h3>
+      ${anyPollen ? `<div class="risk-wrap"><table class="risk"><thead><tr><th></th>${dl.map((d) => `<th>${dayShort(d.t)}</th>`).join('')}</tr></thead><tbody>${pollenRows}</tbody></table></div>`
+        : `<p class="skill-lead">${tx('Momentálne je mimo peľovej sezóny, žiadny z hlavných alergénov nelieta.', 'Momentálně je mimo pylovou sezónu, žádný z hlavních alergenů nelétá.')}</p>`}
+    </div>
+    <p class="foot">${tx('Zdroj: Copernicus CAMS cez Open-Meteo (model ~10 km, nie meranie). Index: 0–20 dobrá, 20–40 prijateľná, 40–60 stredná, 60–80 zlá, 80–100 veľmi zlá.', 'Zdroj: Copernicus CAMS přes Open-Meteo (model ~10 km, ne měření). Index: 0–20 dobrá, 20–40 přijatelná, 40–60 střední, 60–80 špatná, 80–100 velmi špatná.')}</p>`;
+  drawAqiChart();
+};
+
+function drawAqiChart() {
+  const el = $('#ch-aqi'); if (!el || !state.air) return;
+  const h = state.air.hourly, n = h.time.length;
+  el.innerHTML = `<div class="chart-head"><h3>${tx('Index kvality ovzdušia · 4 dni', 'Index kvality ovzduší · 4 dny')}</h3></div><svg></svg>`;
+  const W = el.clientWidth || 300, H = 120, m = { l: 30, r: 6, t: 8, b: 20 };
+  const x = d3.scaleLinear().domain([0, n - 1]).range([m.l, W - m.r]);
+  const vmax = Math.max(60, ...h.european_aqi.filter((v) => v != null)) * 1.05;
+  const y = d3.scaleLinear().domain([0, vmax]).range([H - m.b, m.t]);
+  const svg = d3.select(el).select('svg').attr('viewBox', `0 0 ${W} ${H}`).attr('height', H);
+  const bands = [[0, 20, '#4cc38a'], [20, 40, '#4cc38a'], [40, 60, '#e8c547'], [60, 80, '#ff8a3d'], [80, 1000, '#ff4d5e']];
+  for (const [a, b, c] of bands) {
+    if (a >= vmax) continue;
+    svg.append('rect').attr('x', m.l).attr('width', W - m.l - m.r).attr('y', y(Math.min(b, vmax))).attr('height', y(a) - y(Math.min(b, vmax))).attr('fill', c).attr('opacity', 0.06);
+  }
+  [20, 40, 60, 80].filter((v) => v < vmax).forEach((v) => svg.append('text').attr('x', m.l - 5).attr('y', y(v) + 3).attr('text-anchor', 'end').text(v));
+  h.time.forEach((t, i) => { if (localHour(t) === 12) svg.append('text').attr('class', 'd').attr('x', x(i)).attr('y', H - 5).attr('text-anchor', 'middle').text(dayShort(t)); });
+  svg.append('path').attr('d', d3.line().defined((d) => d != null).x((_, i) => x(i)).y((d) => y(d)).curve(d3.curveMonotoneX)(h.european_aqi))
+    .attr('fill', 'none').attr('stroke', '#8fd3ff').attr('stroke-width', 2);
+  const nowI = h.time.findIndex((t) => t > Date.now() / 1000) - 1;
+  if (nowI >= 0) svg.append('line').attr('x1', x(nowI)).attr('x2', x(nowI)).attr('y1', m.t).attr('y2', H - m.b).attr('stroke', '#8fd3ff').attr('stroke-dasharray', '2 3');
+}
+
+/* ------------------------------------------------------------------ ZÁHRADA: pôda, prízemný mráz, výpar a zalievanie */
+async function loadGardenLive() {
+  return fetchJSON('https://api.open-meteo.com/v1/forecast?' + qs({
+    latitude: HK.lat, longitude: HK.lon, timezone: TZ, timeformat: 'unixtime', past_days: 7, forecast_days: 7,
+    daily: 'temperature_2m_min,temperature_2m_max,precipitation_sum,et0_fao_evapotranspiration,sunshine_duration',
+    hourly: 'soil_temperature_0cm,soil_temperature_6cm,soil_temperature_18cm,soil_moisture_0_to_1cm,soil_moisture_3_to_9cm,soil_moisture_9_to_27cm',
+  }));
+}
+
+TAB_RENDER.garden = async () => {
+  const el = $('#pane-garden');
+  if (!state.garden) {
+    el.innerHTML = `<p class="empty">${tx('Načítavam…', 'Načítám…')}</p>`;
+    try {
+      state.garden = await liveOrStale('mp-garden-v1', 60, false, async () => { const d = await loadGardenLive(); cacheSet('mp-garden-v1', d); return d; });
+    } catch {
+      el.innerHTML = `<p class="empty">${tx('Údaje pre záhradu sa nepodarilo načítať.', 'Údaje pro zahradu se nepodařilo načíst.')}</p>`;
+      return;
+    }
+  }
+  const G = state.garden, d = G.daily, now = Date.now() / 1000;
+  const today = d.time.findIndex((t) => dateKey(t) === dateKey(now));
+  const month = new Date().getMonth() + 1, season = month >= 4 && month <= 10;
+  // merania ČHMÚ: posledné hodnoty pôdy a pri zemi
+  const O = state.obs && !state.demo.local ? state.obs : null;
+  const last = (k) => { if (!O || !O[k]) return null; for (let i = O.time.length - 1; i >= 0; i--) if (O[k][i] != null) return [O[k][i], O.time[i]]; return null; };
+  const soil = [['5 cm', 't05'], ['10 cm', 't10'], ['20 cm', 't20'], ['50 cm', 't50'], ['100 cm', 't100']].map(([n, k]) => [n, last(k)]);
+  const tpm = last('tpm');
+  // vodná bilancia: posledných 7 dní (zrážky ČHMÚ, ak sú) a najbližšie 3 dni
+  const past = d.time.map((t, i) => i).filter((i) => i < today && i >= today - 7);
+  let rainPast = past.reduce((s, i) => s + (d.precipitation_sum[i] || 0), 0);
+  if (O) {
+    const from = d.time[Math.max(0, today - 7)], to = d.time[today];
+    const vals = O.time.map((t, i) => (t > from && t <= to ? O.precip[i] : null)).filter((x) => x != null);
+    if (vals.length > 24 * 5) rainPast = vals.reduce((a, b) => a + b, 0);
+  }
+  const etPast = past.reduce((s, i) => s + (d.et0_fao_evapotranspiration[i] || 0), 0);
+  const next = [today, today + 1, today + 2].filter((i) => i < d.time.length);
+  const rainNext = next.reduce((s, i) => s + (d.precipitation_sum[i] || 0), 0);
+  const etNext = next.reduce((s, i) => s + (d.et0_fao_evapotranspiration[i] || 0), 0);
+  const bal = rainPast - etPast, balNext = bal + rainNext - etNext;
+  let rec, lvl;
+  if (!season) { rec = tx('Mimo vegetačnej sezóny – zalievanie netreba.', 'Mimo vegetační sezónu – zalévání není potřeba.'); lvl = 'ok'; }
+  else if (balNext < -15) { rec = tx('Odporúčam zalievať – pôda vysychá a výdatný dážď sa nečaká.', 'Doporučuji zalévat – půda vysychá a vydatný déšť se neočekává.'); lvl = 'serious'; }
+  else if (balNext < -5) { rec = tx('Citlivé rastliny a výsevy treba poliať.', 'Citlivé rostliny a výsevy je třeba zalít.'); lvl = 'warn'; }
+  else { rec = tx('Zalievať netreba – vlahy je dosť.', 'Zalévat není potřeba – vláhy je dost.'); lvl = 'ok'; }
+  // tabuľka 7 dní
+  const rows = d.time.map((t, i) => i).filter((i) => i >= today && i < today + 7).map((i) => {
+    const tmin = d.temperature_2m_min[i];
+    const frost = tmin == null ? '' : tmin <= 0 ? 'crit' : tmin <= 3 ? 'warn' : '';
+    const frostTxt = tmin == null ? '–' : tmin <= 0 ? tx('mráz', 'mráz') : tmin <= 3 ? tx('pri zemi', 'při zemi') : '–';
+    return `<tr><th>${dayShort(d.time[i])}</th><td>${r1(tmin)} / ${r1(d.temperature_2m_max[i])}</td>
+      <td data-level="${frost === 'crit' ? 'crit' : frost === 'warn' ? 'warn' : 'low'}">${frostTxt}</td>
+      <td>${r1(d.precipitation_sum[i])}</td><td>${r1(d.et0_fao_evapotranspiration[i])}</td><td>${r1((d.sunshine_duration[i] || 0) / 3600)}</td></tr>`;
+  }).join('');
+  // vlhkosť pôdy z modelu (aktuálna hodina)
+  const hi = G.hourly.time.findIndex((t) => t > now) - 1;
+  const sm = (k) => (hi >= 0 ? G.hourly[k][hi] : null);
+  el.innerHTML = `<div class="summary" data-level="${lvl}"><p><span class="chip" data-level="${lvl}">${tx('ZALIEVANIE', 'ZALÉVÁNÍ')}</span> ${rec}</p>
+      <div class="conf">${tx('Vodná bilancia 7 dní', 'Vodní bilance 7 dní')}: ${tx('zrážky', 'srážky')} ${r1(rainPast)} mm − ${tx('výpar', 'výpar')} ${r1(etPast)} mm = <b>${bal >= 0 ? '+' : ''}${r1(bal)} mm</b> ·
+      ${tx('o 3 dni', 'za 3 dny')} ${balNext >= 0 ? '+' : ''}${r1(balNext)} mm</div></div>
+    <div class="block"><h3>${tx('Teplota pôdy · ČHMÚ Svobodné Dvory', 'Teplota půdy · ČHMÚ Svobodné Dvory')}</h3>
+      ${soil.some(([, v]) => v) ? `<dl class="kv">${soil.map(([n, v]) => `<div><dt>${n}</dt><dd>${v ? r1(v[0]) : '–'}<small>°C</small></dd></div>`).join('')}
+        <div><dt>${tx('5 cm nad zemou', '5 cm nad zemí')}</dt><dd>${tpm ? r1(tpm[0]) : '–'}<small>°C</small></dd></div></dl>
+        <div class="skill-note">${tx('Meranie', 'Měření')} ${soil.find(([, v]) => v) ? fmtTime.format(soil.find(([, v]) => v)[1][1] * 1000) : ''} ·
+          ${tx('teplota 5 cm nad zemou je pri jasnej noci o 2–5 °C nižšia než vo výške 2 m – rozhoduje o prízemnom mraze.', 'teplota 5 cm nad zemí je za jasné noci o 2–5 °C nižší než ve výšce 2 m – rozhoduje o přízemním mrazu.')}</div>`
+        : `<p class="skill-lead">${tx('Merania pôdy sa zobrazia po najbližšej hodinovej aktualizácii.', 'Měření půdy se zobrazí po nejbližší hodinové aktualizaci.')}</p>`}
+    </div>
+    <div class="block"><h3>${tx('Najbližších 7 dní', 'Nejbližších 7 dní')}</h3><div class="risk-wrap"><table class="risk garden">
+      <thead><tr><th></th><th>min / max °C</th><th>${tx('Mráz', 'Mráz')}</th><th>${tx('Zrážky mm', 'Srážky mm')}</th><th>${tx('Výpar mm', 'Výpar mm')}</th><th>${tx('Slnko h', 'Slunce h')}</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+      <div class="skill-note">${tx('„Pri zemi“ = minimum vo výške 2 m do 3 °C, pri zemi môže mrznúť. Vlhkosť pôdy (model)', '„Při zemi“ = minimum ve výšce 2 m do 3 °C, při zemi může mrznout. Vlhkost půdy (model)')}:
+        0–1 cm ${r0((sm('soil_moisture_0_to_1cm') || 0) * 100)} %, 3–9 cm ${r0((sm('soil_moisture_3_to_9cm') || 0) * 100)} %, 9–27 cm ${r0((sm('soil_moisture_9_to_27cm') || 0) * 100)} % obj.</div></div>
+    <p class="foot">${tx('Výpar = referenčná evapotranspirácia FAO (trávnik). Zdroj: Open-Meteo, merania ČHMÚ.', 'Výpar = referenční evapotranspirace FAO (trávník). Zdroj: Open-Meteo, měření ČHMÚ.')}</p>`;
+};
+
 /* ------------------------------------------------------------------ VÝSTRAHY ČHMÚ (data/warnings.json z GitHub Actions) */
 const WARN_LEVEL = { yellow: tx('Žltá výstraha', 'Žlutá výstraha'), orange: tx('Oranžová výstraha', 'Oranžová výstraha'), red: tx('Červená výstraha', 'Červená výstraha') };
 const fmtWarnTime = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -1702,8 +1948,11 @@ async function load(force = false) {
   const getPrecip = () => liveOrStale('mp-precip-v1', 10, force, async () => {
     const d = await loadPrecipLive(); cacheSet('mp-precip-v1', d); return d;
   });
+  const getWinter = () => liveOrStale('mp-winter-v1', 30, force, async () => {
+    const d = await loadWinterLive(); cacheSet('mp-winter-v1', d); return d;
+  });
   const own = (f) => fetchJSON(`data/${f}?v=${Math.floor(Date.now() / 600000)}`, 15000);
-  const [lr, gr, sk, ob, pr] = await Promise.allSettled([getLocal(), getGrid(), own('skill.json'), own('obs-recent.json'), getPrecip()]);
+  const [lr, gr, sk, ob, pr, wi] = await Promise.allSettled([getLocal(), getGrid(), own('skill.json'), own('obs-recent.json'), getPrecip(), getWinter()]);
   if (pr.status !== 'fulfilled') console.warn('Zrážky detailne – živé dáta zlyhali:', pr.reason);
   state.skill = sk.status === 'fulfilled' ? sk.value : null;
   state.obs = ob.status === 'fulfilled' ? ob.value : null;
@@ -1718,7 +1967,8 @@ async function load(force = false) {
   state.tracks = buildTracks(state.grid);
   state.step = Math.min(state.step, state.grid.times.length - 1);
 
-  renderNow(); renderPrecip(); renderSummary(); renderRisk(); renderSkill();
+  state.winter = wi.status === 'fulfilled' ? wi.value : null;
+  renderNow(); renderPrecip(); renderWinter(); renderSummary(); renderRisk(); renderSkill();
   if (!charts.length) setupCharts();
   drawCharts();
   renderLegend(); renderTimeline(); renderSystems();
@@ -1786,6 +2036,8 @@ function setupPwa() {
 
 function init() {
   applyLang();
+  document.querySelectorAll('#tab-seg button').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
+  try { const t = localStorage.getItem('mp-tab'); if (t && document.querySelector(`.tab-pane[data-pane="${t}"]`)) state.tab = t; } catch { /* nevadí */ }
   setupPwa();
   const tick = () => { $('#clock').textContent = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date()); };
   tick(); setInterval(tick, 1000);
@@ -1812,9 +2064,9 @@ function init() {
   });
 
   let rt = null;
-  new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { mapResize(); drawCharts(); drawPrecipChart(); }, 120); }).observe(document.body);
+  new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { mapResize(); drawCharts(); drawPrecipChart(); if (state.tab === 'air') drawAqiChart(); }, 120); }).observe(document.body);
 
-  load();
+  load().then(() => { if (state.tab && state.tab !== 'forecast') setTab(state.tab); });
   setInterval(() => load(), 30 * 60000); // automatická obnova každých 30 min
   refreshRadar();
   setInterval(refreshRadar, 5 * 60000);
