@@ -2159,15 +2159,55 @@ function renderWeek() {
     const gust = di >= 0 ? dd.wind_gusts_10m_max[di] : null;
     const risky = (d.gust60 || 0) >= 0.4 || (d.storm || 0) >= 0.4 || (d.rain10 || 0) >= 0.5;
     const name = k === 0 ? tx('Dnes', 'Dnes') : k === 1 ? tx('Zajtra', 'Zítra') : dayShort(d.t);
-    return `<div class="day${risky ? ' risky' : ''}" title="${WMO[code] || ''}">
+    return `<button type="button" class="day${risky ? ' risky' : ''}" data-k="${k}" title="${WMO[code] || ''} – ${tx('podrobnosti', 'podrobnosti')}">
       <div class="dn">${name}</div>${wxIcon(code)}
       <div class="tt"><b>${r0(tmax)}°</b><span>${r0(tmin)}°</span></div>
       <div class="pr${rain >= 0.5 ? ' wet' : ''}">${rain >= 0.5 ? `${r1(rain)} mm` : '–'}${pp != null && pp >= 20 ? ` · ${pp} %` : ''}</div>
-      <div class="gu">${gust != null ? `${tx('vietor', 'vítr')} ${r0(gust)}` : ''}</div></div>`;
+      <div class="gu">${gust != null ? `${tx('vietor', 'vítr')} ${r0(gust)}` : ''}</div></button>`;
   }).join('');
   el.hidden = false;
   el.innerHTML = cards;
 }
+
+/* ---- detail dňa: priebeh po hodinách */
+function openDay(k) {
+  const L = state.local, D = state.derived, d = D && D.days[k];
+  if (!d) return;
+  const idx = L.times.map((t, i) => i).filter((i) => dateKey(L.times[i]) === d.key);
+  const T = D.ai ? D.ai.t : D.cons.t, G = D.ai ? D.ai.g : D.cons.g;
+  const di = L.daily ? L.daily.time.findIndex((t) => dateKey(t) === d.key) : -1;
+  const sun = L.sun.find(([r]) => dateKey(r) === d.key);
+  const temps = idx.map((i) => T[i]).filter((x) => x != null);
+  const rainSum = idx.reduce((s, i) => s + (D.cons.p[i] || 0), 0);
+  const gmax = Math.max(0, ...idx.map((i) => G[i] || 0));
+  const tcol = (v) => (v == null ? '' : `background:${v <= 0 ? 'rgba(95,168,255,.35)' : v >= 30 ? 'rgba(255,77,94,.4)' : v >= 25 ? 'rgba(255,138,61,.35)' : v >= 15 ? 'rgba(232,197,71,.18)' : 'transparent'}`);
+  const hours = idx.map((i) => `<td>${String(localHour(L.times[i])).padStart(2, '0')}</td>`).join('');
+  const row = (name, f) => `<tr><th>${name}</th>${idx.map(f).join('')}</tr>`;
+  const risks = HAZARDS.filter(([key]) => (d[key] || 0) >= 0.2).map(([key, name]) => `<span class="chip" data-level="${levelOf(d[key])}">${name.toUpperCase()} ${pct(d[key])}</span>`).join(' ');
+  $('#day-panel').innerHTML = `<div class="dp-head"><h2 id="day-title">${dayLabel(d.t)}</h2>${di >= 0 ? wxIcon(L.daily.weather_code[di]) : ''}
+      <span class="dp-desc">${di >= 0 ? WMO[L.daily.weather_code[di]] || '' : ''}</span><span class="spacer"></span>
+      <button type="button" class="max-btn" id="day-close" aria-label="${tx('Zavrieť', 'Zavřít')}">✕</button></div>
+    <dl class="kv">
+      <div><dt>max / min</dt><dd>${r0(Math.max(...temps))} / ${r0(Math.min(...temps))}<small>°C</small></dd></div>
+      <div><dt>${tx('Zrážky', 'Srážky')}</dt><dd>${r1(rainSum)}<small>mm</small></dd></div>
+      <div><dt>${tx('Nárazy max', 'Nárazy max')}</dt><dd>${r0(gmax)}<small>km/h</small></dd></div>
+      <div><dt>${tx('Východ / západ', 'Východ / západ')}</dt><dd>${sun ? fmtTime.format(sun[0] * 1000) + ' / ' + fmtTime.format(sun[1] * 1000) : '–'}</dd></div>
+    </dl>
+    ${risks ? `<p class="dp-risk">${risks}</p>` : ''}
+    <div class="pm-wrap"><table class="pm dp-table">
+      <thead><tr><th></th>${hours}</tr></thead><tbody>
+      ${row(tx('Teplota °C', 'Teplota °C'), (i) => `<td style="${tcol(T[i])}">${r0(T[i])}</td>`)}
+      ${row(tx('Zrážky mm', 'Srážky mm'), (i) => { const p = D.cons.p[i] || 0, c = rainClass(p); return c ? `<td style="--c:${c.color}" data-c="${RAIN_CLASSES.indexOf(c)}">${r1(p)}</td>` : '<td class="dry">·</td>'; })}
+      ${row(tx('Pravdep. %', 'Pravděp. %'), (i) => { const pr = D.pRain[i]; return pr == null ? '<td class="na">·</td>' : `<td style="color:${pr >= 0.5 ? '#c9d0ff' : 'var(--dim)'}">${Math.round(pr * 100)}</td>`; })}
+      ${row(tx('Nárazy km/h', 'Nárazy km/h'), (i) => `<td style="${(G[i] || 0) >= 60 ? 'color:#ffc08f;font-weight:600' : ''}">${r0(G[i])}</td>`)}
+      ${row(tx('Istota ±°C', 'Jistota ±°C'), (i) => { const a = D.band.t[0][i], b = D.band.t[1][i]; return `<td class="dim">${a == null ? '·' : r0((b - a) / 2)}</td>`; })}
+      </tbody></table></div>
+    <div class="skill-note">${D.ai ? tx('Teplota a vietor: AI predpoveď.', 'Teplota a vítr: AI předpověď.') : ''} ${tx('Zrážky: priemer modelov, pravdepodobnosť a istota z ensemble (±°C = polovica rozpätia 10–90 %).', 'Srážky: průměr modelů, pravděpodobnost a jistota z ensemble (±°C = polovina rozpětí 10–90 %).')}</div>`;
+  $('#day-overlay').hidden = false;
+  $('#day-close').focus();
+  $('#day-close').addEventListener('click', closeDay);
+}
+function closeDay() { $('#day-overlay').hidden = true; }
 
 /* ------------------------------------------------------------------ RIEKY (data/rivers.json z hydrologických dát ČHMÚ) */
 const SPA_NAME = [tx('normálny stav', 'normální stav'), tx('1. SPA · bdelosť', '1. SPA · bdělost'), tx('2. SPA · pohotovosť', '2. SPA · pohotovost'), tx('3. SPA · ohrozenie', '3. SPA · ohrožení')];
@@ -2364,6 +2404,8 @@ function setupPwa() {
 function init() {
   applyLang();
   document.querySelectorAll('#tab-seg button').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
+  $('#week').addEventListener('click', (e) => { const b = e.target.closest('.day'); if (b) openDay(+b.dataset.k); });
+  $('#day-overlay').addEventListener('click', (e) => { if (e.target.id === 'day-overlay') closeDay(); });
   try { const t = localStorage.getItem('mp-tab'); if (t && document.querySelector(`.tab-pane[data-pane="${t}"]`)) state.tab = t; } catch { /* nevadí */ }
   setupPwa();
   const tick = () => { $('#clock').textContent = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date()); };
@@ -2379,7 +2421,11 @@ function init() {
     renderLegend(); renderTimeline(); renderSystems(); drawMap();
   }));
   document.querySelectorAll('.max-btn').forEach((b) => b.addEventListener('click', () => toggleMax(b.dataset.max)));
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#windows').dataset.max) toggleMax(null); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!$('#day-overlay').hidden) closeDay();
+    else if ($('#windows').dataset.max) toggleMax(null);
+  });
   $('#time').addEventListener('input', (e) => { togglePlay(false); setStep(+e.target.value); });
   $('#play').addEventListener('click', () => togglePlay());
   $('#refresh').addEventListener('click', () => load(true));
