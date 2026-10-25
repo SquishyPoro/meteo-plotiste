@@ -666,13 +666,16 @@ function drawMap() {
   ctx.clearRect(0, 0, map.w, map.h);
   ctx.fillStyle = css('--sea'); ctx.fillRect(0, 0, map.w, map.h);
   const path = d3.geoPath(map.proj, ctx);
-  const s = state.step;
+  const s = state.layer === 'sat' ? 0 : state.step; // nad satelitom aktuálny tlak
 
   // zemepisná sieť
   ctx.beginPath(); path(d3.geoGraticule().step([10, 10]).extent([[-40, 25], [60, 80]])());
   ctx.strokeStyle = '#ffffff0d'; ctx.lineWidth = 1; ctx.stroke();
 
-  if (state.grid) drawField(ctx, s);
+  if (state.layer === 'sat') {
+    drawSat(ctx);
+    if (!state.sat) { ctx.fillStyle = '#dbe5f2'; ctx.font = '13px ' + css('--body'); ctx.textAlign = 'center'; ctx.fillText(state.satError ? tx('Satelit sa nepodarilo načítať.', 'Satelit se nepodařilo načíst.') : tx('Načítavam satelit…', 'Načítám satelit…'), map.w / 2, map.h / 2); ctx.textAlign = 'start'; }
+  } else if (state.grid) drawField(ctx, s);
 
   // pobrežie a hranice
   if (!map.coast) { map.coast = toLines(window.EU_GEO.coast); map.borders = toLines(window.EU_GEO.borders); }
@@ -740,6 +743,11 @@ function drawMap() {
 
 function renderLegend() {
   const el = $('#map-legend');
+  if (state.layer === 'sat') {
+    el.innerHTML = `<div class="lt">${tx('Satelit MTG · GeoColour', 'Satelit MTG · GeoColour')}</div><div class="keys rk"><span>${tx('cez deň skutočné farby, v noci infračervený obraz (oblaky biele/sivé)', 've dne skutečné barvy, v noci infračervený obraz (oblaka bílá/šedá)')}</span></div>
+      <div class="keys"><span>${tx('čiary = aktuálne izobary', 'čáry = aktuální izobary')}</span></div>`;
+    return;
+  }
   if (state.layer === 'radar') {
     el.innerHTML = `<div class="lt">${tx('Radar · intenzita [mm/h]', 'Radar · intenzita [mm/h]')}</div><div class="keys rk">${RAIN_CLASSES.map((c) => `<span style="--c:${c.color}">${c.name} ≥ ${String(c.min).replace('.', ',')}</span>`).join('')}
       <span style="--c:${R_STORM}">${tx('búrka, krúpy', 'bouřka, kroupy')} ≥ 50 dBZ</span></div><div class="keys rk"><span style="--c:#ffe65a">${tx('blesky za 30 min (satelit MTG)', 'blesky za 30 min (satelit MTG)')}</span></div><div class="keys"><span>${tx('šípka = pohyb zrážok za 60 min', 'šipka = pohyb srážek za 60 min')}</span></div>`;
@@ -758,6 +766,14 @@ function renderLegend() {
 }
 
 function renderTimeline() {
+  if (state.layer === 'sat') {
+    const inp = $('#time');
+    if (!state.sat) { $('#tl-label').textContent = tx('Satelit…', 'Satelit…'); return; }
+    inp.max = state.sat.length - 1; inp.value = state.sstep;
+    const fr = state.sat[state.sstep], m = Math.round((fr.time - Date.now() / 1000) / 60);
+    $('#tl-label').innerHTML = `${fmtTime.format(fr.time * 1000)} <span>${m} min</span>`;
+    return;
+  }
   if (state.layer === 'radar') {
     const seq = radarSeq(), inp = $('#time');
     if (!seq.length) { $('#tl-label').textContent = 'Radar…'; return; }
@@ -782,7 +798,7 @@ function mapReadout(ev) {
   const ll = map.proj.invert([ev.clientX - r.left, ev.clientY - r.top]);
   if (!ll) return;
   const gx = (ll[0] - GRID.lon0) / GRID.dlon, gy = (ll[1] - GRID.lat0) / GRID.dlat;
-  const s = state.step, G = state.grid;
+  const s = state.layer === 'sat' ? 0 : state.step, G = state.grid;
   const p = sampleGrid(G.P[s], gx, gy);
   const el = $('#map-readout');
   if (p == null) { el.innerHTML = tx('Mimo dátovej mriežky', 'Mimo datové mřížky'); return; }
@@ -811,6 +827,65 @@ function renderSystems() {
       <div class="d">${tx('teraz', 'nyní')} ${regionName(now.lon, now.lat)}; ${tx('najbližšie', 'nejblíže')} ${r0(t.near)} km ${dir} — ${dayShort(t.nearAt.t)} ${fmtTime.format(t.nearAt.t * 1000)}</div>
       <div class="p">${impTxt}</div></button>`;
   }).join('');
+}
+
+/* ------------------------------------------------------------------ SATELIT (EUMETSAT MTG, GeoColour: deň skutočné farby, noc IR) */
+const SAT = { layer: 'mtg_fd:rgb_geocolour', w: 1800, h: 940, lon0: -40, lon1: 60, lat0: 27, lat1: 76, frames: 9 };
+async function loadSat() {
+  const newest = Math.floor((Date.now() / 1000 - 1200) / 600) * 600; // ~20 min oneskorenie
+  const frames = await Promise.all(Array.from({ length: SAT.frames }, (_, k) => newest - (SAT.frames - 1 - k) * 600).map(async (t) => {
+    const url = `${LI_WMS}?service=WMS&version=1.3.0&request=GetMap&layers=${SAT.layer}&styles=&format=image/jpeg`
+      + `&crs=CRS:84&bbox=${SAT.lon0},${SAT.lat0},${SAT.lon1},${SAT.lat1}&width=${SAT.w}&height=${SAT.h}&time=${new Date(t * 1000).toISOString().slice(0, 19)}Z`;
+    try {
+      const im = await loadImg(url);
+      const cv = document.createElement('canvas'); cv.width = SAT.w; cv.height = SAT.h;
+      const ctx = cv.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(im, 0, 0);
+      return { time: t, px: ctx.getImageData(0, 0, SAT.w, SAT.h).data, cache: null };
+    } catch { return null; }
+  }));
+  const ok = frames.filter(Boolean);
+  if (!ok.length) throw new Error('satelit nedostupný');
+  return ok;
+}
+function drawSat(ctx) {
+  const fr = state.sat && state.sat[state.sstep];
+  if (!fr) return;
+  const f = 2, fw = Math.ceil(map.w / f), fh = Math.ceil(map.h / f);
+  if (!map.satIdx || map.satIdx.w !== fw || map.satIdx.h !== fh) { // prepočet obrazovka -> pixel satelitu (raz na veľkosť okna)
+    const idx = new Int32Array(fw * fh);
+    for (let y = 0; y < fh; y++) for (let x = 0; x < fw; x++) {
+      const ll = map.proj.invert([x * f + f / 2, y * f + f / 2]);
+      let k = -1;
+      if (ll) {
+        const sx = Math.floor((ll[0] - SAT.lon0) / (SAT.lon1 - SAT.lon0) * SAT.w), sy = Math.floor((SAT.lat1 - ll[1]) / (SAT.lat1 - SAT.lat0) * SAT.h);
+        if (sx >= 0 && sy >= 0 && sx < SAT.w && sy < SAT.h) k = (sy * SAT.w + sx) * 4;
+      }
+      idx[y * fw + x] = k;
+    }
+    map.satIdx = { w: fw, h: fh, idx };
+    state.sat.forEach((x) => { x.cache = null; });
+  }
+  if (!fr.cache) {
+    const cv = document.createElement('canvas'); cv.width = fw; cv.height = fh;
+    const c2 = cv.getContext('2d'), img = c2.createImageData(fw, fh), d = img.data, idx = map.satIdx.idx;
+    for (let i = 0; i < idx.length; i++) {
+      const k = idx[i]; if (k < 0) continue;
+      d[i * 4] = fr.px[k]; d[i * 4 + 1] = fr.px[k + 1]; d[i * 4 + 2] = fr.px[k + 2]; d[i * 4 + 3] = 255;
+    }
+    c2.putImageData(img, 0, 0);
+    fr.cache = cv;
+  }
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.globalAlpha = 0.92; ctx.drawImage(fr.cache, 0, 0, map.w, map.h); ctx.globalAlpha = 1;
+}
+async function refreshSat() {
+  try {
+    state.sat = await loadSat();
+    state.satError = false;
+    state.sstep = state.sat.length - 1;
+  } catch (e) { console.warn('Satelit:', e); state.satError = true; }
+  if (state.layer === 'sat') { renderTimeline(); drawMap(); }
 }
 
 /* ------------------------------------------------------------------ PLOTIŠTĚ: panel */
@@ -2344,7 +2419,7 @@ async function load(force = false) {
 }
 
 function setStep(s) {
-  if (state.layer === 'radar') state.rstep = s; else state.step = s;
+  if (state.layer === 'radar') state.rstep = s; else if (state.layer === 'sat') state.sstep = s; else state.step = s;
   renderTimeline(); drawMap();
 }
 
@@ -2356,6 +2431,7 @@ function togglePlay(on) {
   b.setAttribute('aria-pressed', on); b.textContent = on ? '❚❚ Pauza' : tx('▶ Prehrať', '▶ Přehrát');
   if (on) playTimer = setInterval(() => {
     if (state.layer === 'radar') { const n = radarSeq().length; if (n) setStep((state.rstep + 1) % n); }
+    else if (state.layer === 'sat') { if (state.sat) setStep((state.sstep + 1) % state.sat.length); }
     else setStep((state.step + 1) % state.grid.times.length);
   }, state.layer === 'radar' ? 450 : 650);
 }
@@ -2413,11 +2489,16 @@ function init() {
   renderLegend();
 
   document.querySelectorAll('#layer-seg button').forEach((b) => b.addEventListener('click', () => {
-    const wasRadar = state.layer === 'radar';
+    const wasRadar = state.layer === 'radar' || state.layer === 'sat';
     state.layer = b.dataset.layer;
+    if (state.layer === 'sat' && !state.sat && !state.satLoading) {
+      state.satLoading = true;
+      refreshSat().finally(() => { state.satLoading = false; });
+      setInterval(() => { if (state.layer === 'sat') refreshSat(); }, 10 * 60000);
+    }
     document.querySelectorAll('#layer-seg button').forEach((x) => x.setAttribute('aria-pressed', x === b));
     if (state.layer === 'radar' && state.radar) state.rstep = state.radar.frames.length - 1;
-    if (wasRadar !== (state.layer === 'radar')) togglePlay(false);
+    if (wasRadar || state.layer === 'radar' || state.layer === 'sat') togglePlay(false);
     renderLegend(); renderTimeline(); renderSystems(); drawMap();
   }));
   document.querySelectorAll('.max-btn').forEach((b) => b.addEventListener('click', () => toggleMax(b.dataset.max)));

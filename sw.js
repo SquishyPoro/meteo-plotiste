@@ -1,7 +1,7 @@
 /* Service worker Meteo Plotiště: aplikácia sa otvorí aj bez signálu.
  * Vlastné súbory a dáta: najprv sieť, pri výpadku posledná uložená verzia.
  * Knižnice a písma z CDN: z cache (nemenia sa). Radarové dlaždice sa neukladajú. */
-const VERSION = 'mp-v2';
+const VERSION = 'mp-v3';
 const SHELL = ['./', 'index.html', 'assets/style.css', 'assets/app.js', 'assets/europe-geo.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js'];
 
