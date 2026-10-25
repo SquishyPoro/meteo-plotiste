@@ -1,0 +1,33 @@
+name: probe-sources
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe
+        run: |
+          set +e
+          mkdir out && cd out
+          O="Origin: https://squishyporo.github.io"
+          W="https://view.eumetsat.int/geoserver/wms"
+          curl -sS -m 90 "$W?service=WMS&version=1.3.0&request=GetCapabilities" -o caps.xml
+          grep -o "<Name>[^<]*</Name>" caps.xml | grep -i "li_\|light\|mtg_fd:li\|flash" | head -40 > layers.txt
+          grep -c "<Layer" caps.xml >> layers.txt
+          L=$(grep -o "<Name>[^<]*</Name>" caps.xml | grep -i "li_afa\|li_acc\|lightning" | head -1 | sed 's/<[^>]*>//g'); echo "LAYER=$L" >> layers.txt
+          python3 - "$L" <<'PY'
+          import sys, re
+          caps = open('caps.xml').read()
+          L = sys.argv[1]
+          i = caps.find('<Name>' + L + '</Name>')
+          open('layer-detail.txt', 'w').write(caps[max(0, i - 300): i + 2500])
+          PY
+          curl -sS -m 60 -D hdr.txt -H "$O" "$W?service=WMS&version=1.3.0&request=GetMap&layers=$L&styles=&format=image/png&transparent=true&crs=EPSG:3857&bbox=1252344,5947000,2191602,6887893&width=512&height=512" -o li.png
+          grep -i "HTTP/\|access-control\|content-type" hdr.txt >> layers.txt
+          file li.png >> layers.txt
+          rm caps.xml
+          cd .. && git init -q probe && cp out/* probe/ && cd probe
+          git config user.name probe && git config user.email probe@users.noreply.github.com
+          git add -A && git commit -qm probe
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" HEAD:refs/heads/probe-out
