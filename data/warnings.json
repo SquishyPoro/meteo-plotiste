@@ -1,0 +1,17 @@
+{
+ "updated": 1792923465,
+ "area": "ORP Hradec Králové",
+ "warnings": [
+  {
+   "event": "Hydrologické sucho",
+   "level": "orange",
+   "onset": "2026-10-20T14:00:00+02:00",
+   "expires": "",
+   "certainty": "Observed",
+   "description": "V reprezentativním hydrologickém profilu pro dané ORP poklesla hladina vodního toku na úroveň indikující sucho a zároveň zde poklesla i hladina podzemní vody v mělkých zvodních na úroveň indikující sucho.",
+   "instruction": "Užívání nebo nakládání s povrchovými i podzemními vodami musí být v souladu s Vodním zákonem, případně krajským plánem pro zvládání sucha a stavu nedostatku vody.",
+   "situation": "",
+   "web": "https://hamr.chmi.cz/"
+  }
+ ]
+}
