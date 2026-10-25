@@ -649,6 +649,8 @@ def main():
     # upratať staré záznamy
     for k in [k for k, t in sent.items() if now - t > 7 * 86400]:
         del sent[k]
+    if '--dry' in sys.argv:  # skúšobný beh nemení stav (inak by „odoslané“ upozornenia neprišli naozaj)
+        return
     os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
     with open(STATE_PATH, 'w') as f:
         json.dump(state, f, indent=1, sort_keys=True)
