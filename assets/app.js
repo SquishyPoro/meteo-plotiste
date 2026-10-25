@@ -2234,8 +2234,11 @@ function renderWeek() {
     const gust = di >= 0 ? dd.wind_gusts_10m_max[di] : null;
     const risky = (d.gust60 || 0) >= 0.4 || (d.storm || 0) >= 0.4 || (d.rain10 || 0) >= 0.5;
     const name = k === 0 ? tx('Dnes', 'Dnes') : k === 1 ? tx('Zajtra', 'Zítra') : dayShort(d.t);
+    const ch = changeOf(new Date(d.t * 1000).toLocaleDateString('sv-SE', { timeZone: TZ }));
+    const dch = ch ? ch.tmax[0] - ch.tmax[1] : 0;
+    const badge = ch && Math.abs(dch) >= 2 ? `<span class="chg ${dch > 0 ? 'up' : 'down'}" title="${tx('zmena oproti včerajšej predpovedi', 'změna oproti včerejší předpovědi')}">${dch > 0 ? '▲' : '▼'}${r0(Math.abs(dch))}°</span>` : '';
     return `<button type="button" class="day${risky ? ' risky' : ''}" data-k="${k}" title="${WMO[code] || ''} – ${tx('podrobnosti', 'podrobnosti')}">
-      <div class="dn">${name}</div>${wxIcon(code)}
+      <div class="dn">${name}${badge}</div>${wxIcon(code)}
       <div class="tt"><b>${r0(tmax)}°</b><span>${r0(tmin)}°</span></div>
       <div class="pr${rain >= 0.5 ? ' wet' : ''}">${rain >= 0.5 ? `${r1(rain)} mm` : '–'}${pp != null && pp >= 20 ? ` · ${pp} %` : ''}</div>
       <div class="gu">${gust != null ? `${tx('vietor', 'vítr')} ${r0(gust)}` : ''}</div></button>`;
@@ -2400,6 +2403,59 @@ function renderSky() {
       <div><b>${uvl[2]}</b><span>${uvl[3] || tx('ochrana nie je potrebná', 'ochrana není potřeba')}${uvTom != null ? ` · ${tx('zajtra', 'zítra')} ${r0(uvTom)}` : ''}</span></div></div>` : ''}`;
 }
 
+/* ------------------------------------------------------------------ ZMENY PREDPOVEDE A OVERENIE (data/fc-changes.json, data/verify.json) */
+const fmtD = (iso) => dayShort(new Date(iso + 'T12:00:00').getTime() / 1000);
+function changeOf(dateIso) {
+  const C = state.changes; if (!C || !C.days) return null;
+  return C.days.find((d) => d.date === dateIso) || null;
+}
+function renderVerify() {
+  const el = $('#verify');
+  const V = state.verify, C = state.changes;
+  const H = V && V.history ? V.history : [];
+  if (!H.length && !(C && C.days && C.days.length)) { el.hidden = true; return; }
+  el.hidden = false;
+  let html = `<h3>${tx('Ako sa trafila predpoveď', 'Jak vyšla předpověď')}</h3>`;
+  const last = H[H.length - 1];
+  if (last) {
+    const f = last.fc, o = last.obs;
+    const diff = (a, b, dec) => { const d = a - b; return `<td class="${Math.abs(d) >= (dec ? 2 : 3) ? 'bad' : Math.abs(d) <= (dec ? 1 : 1) ? 'good' : ''}">${d > 0 ? '+' : ''}${dec ? r1(d) : r1(d)}</td>`; };
+    const hh = (h) => (h == null ? '–' : `${String(h).padStart(2, '0')}:00`);
+    html += `<p class="skill-lead">${fmtD(last.date)} – ${tx('predpoveď z predchádzajúceho dňa vs. merania ČHMÚ', 'předpověď z předchozího dne vs. měření ČHMÚ')}:</p>
+      <div class="risk-wrap"><table class="skill vt"><thead><tr><th></th><th>${tx('predpoveď', 'předpověď')}</th><th>${tx('namerané', 'naměřeno')}</th><th>${tx('rozdiel', 'rozdíl')}</th></tr></thead><tbody>
+        <tr><td>Max °C</td><td>${r1(f.tmax)}</td><td>${r1(o.tmax)}</td>${diff(f.tmax, o.tmax, true)}</tr>
+        <tr><td>Min °C</td><td>${r1(f.tmin)}</td><td>${r1(o.tmin)}</td>${diff(f.tmin, o.tmin, true)}</tr>
+        <tr><td>${tx('Zrážky mm', 'Srážky mm')}</td><td>${r1(f.p)}</td><td>${r1(o.p)}</td>${diff(f.p, o.p, false)}</tr>
+        <tr><td>${tx('Začiatok dažďa', 'Začátek deště')}</td><td>${hh(f.start)}</td><td>${hh(o.start)}</td><td>${f.start != null && o.start != null ? `${o.start - f.start > 0 ? '+' : ''}${o.start - f.start} h` : (f.start == null) === (o.start == null) ? '✓' : '✗'}</td></tr>
+      </tbody></table></div>`;
+    const h14 = H.slice(-14);
+    const mae = (k) => h14.reduce((s, h) => s + Math.abs(h[k]), 0) / h14.length;
+    const rainHit = h14.filter((h) => (h.fc.p >= 0.5) === (h.obs.p >= 0.5)).length;
+    // mini graf: chyba maxima po dňoch
+    const W = 260, Hh = 40, bw = W / h14.length;
+    const bars = h14.map((h, i) => { const v = Math.max(-4, Math.min(4, h.dtmax)); const y = Hh / 2 - v * (Hh / 8);
+      return `<rect x="${(i * bw + 1).toFixed(1)}" width="${(bw - 2).toFixed(1)}" y="${Math.min(y, Hh / 2).toFixed(1)}" height="${Math.max(1, Math.abs(Hh / 2 - y)).toFixed(1)}" fill="${v > 0 ? '#ff8a5c' : '#5fa8ff'}" rx="1"><title>${fmtD(h.date)}: ${h.dtmax > 0 ? '+' : ''}${r1(h.dtmax)} °C</title></rect>`; }).join('');
+    html += `<div class="vt-sum"><svg viewBox="0 0 ${W} ${Hh}" width="${W}" height="${Hh}" aria-hidden="true"><line x1="0" x2="${W}" y1="${Hh / 2}" y2="${Hh / 2}" stroke="#ffffff30"/>${bars}</svg>
+      <span>${h14.length} ${tx('dní', 'dní')}: max ±${r1(mae('dtmax'))} °C, min ±${r1(mae('dtmin'))} °C · ${tx('dážď áno/nie trafený', 'déšť ano/ne trefen')} ${rainHit}/${h14.length}</span></div>
+      <div class="skill-note">${tx('Stĺpce: o koľko bolo predpovedané maximum vyššie (červená) alebo nižšie (modrá) než skutočnosť.', 'Sloupce: o kolik bylo předpovězené maximum vyšší (červená) nebo nižší (modrá) než skutečnost.')}
+        ${H.some((h) => h.src === 'previous_runs') ? tx(' Prvé dni sú z archívu Open-Meteo (priemer modelov), ďalšie z vlastného archívu dashboardu.', ' První dny jsou z archivu Open-Meteo (průměr modelů), další z vlastního archivu dashboardu.') : ''}</div>`;
+  }
+  // zmeny od včera
+  if (C && C.days && C.days.length) {
+    const items = C.days.slice(0, 7).map((d) => {
+      const dmax = d.tmax[0] - d.tmax[1], dp = d.p[0] - d.p[1];
+      const parts = [];
+      if (Math.abs(dmax) >= 2) parts.push(dmax > 0 ? tx(`o ${r0(dmax)} °C teplejšie`, `o ${r0(dmax)} °C tepleji`) : tx(`o ${r0(-dmax)} °C chladnejšie`, `o ${r0(-dmax)} °C chladněji`));
+      if (Math.abs(dp) >= 3 && (d.p[0] >= 2 || d.p[1] >= 2)) parts.push(dp > 0 ? tx(`viac zrážok (${r1(d.p[0])} mm, predtým ${r1(d.p[1])})`, `více srážek (${r1(d.p[0])} mm, předtím ${r1(d.p[1])})`) : tx(`menej zrážok (${r1(d.p[0])} mm, predtým ${r1(d.p[1])})`, `méně srážek (${r1(d.p[0])} mm, předtím ${r1(d.p[1])})`));
+      if (d.g[0] != null && d.g[1] != null && Math.abs(d.g[0] - d.g[1]) >= 15) parts.push(d.g[0] > d.g[1] ? tx(`silnejší vietor (${r0(d.g[0])} km/h)`, `silnější vítr (${r0(d.g[0])} km/h)`) : tx(`slabší vietor (${r0(d.g[0])} km/h)`, `slabší vítr (${r0(d.g[0])} km/h)`));
+      return parts.length ? `<li><b>${fmtD(d.date)}</b> ${parts.join(', ')}</li>` : '';
+    }).filter(Boolean);
+    html += `<h3 class="sub-h">${tx('Zmeny predpovede od včera', 'Změny předpovědi od včerejška')}</h3>`
+      + (items.length ? `<ul class="chg-list">${items.join('')}</ul>` : `<p class="skill-lead">${tx('Predpoveď je stabilná – žiadne výrazné zmeny oproti včerajšku.', 'Předpověď je stabilní – žádné výrazné změny oproti včerejšku.')}</p>`);
+  }
+  el.innerHTML = html;
+}
+
 /* ------------------------------------------------------------------ VÝSTRAHY ČHMÚ (data/warnings.json z GitHub Actions) */
 const WARN_LEVEL = { yellow: tx('Žltá výstraha', 'Žlutá výstraha'), orange: tx('Oranžová výstraha', 'Oranžová výstraha'), red: tx('Červená výstraha', 'Červená výstraha') };
 const fmtWarnTime = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -2456,11 +2512,13 @@ async function load(force = false) {
     const d = await loadWinterLive(); cacheSet('mp-winter-v1', d); return d;
   });
   const own = (f) => fetchJSON(`data/${f}?v=${Math.floor(Date.now() / 600000)}`, 15000);
-  const [lr, gr, sk, ob, pr, wi, al] = await Promise.allSettled([getLocal(), getGrid(), own('skill.json'), own('obs-recent.json'), getPrecip(), getWinter(), own('aladin.json')]);
+  const [lr, gr, sk, ob, pr, wi, al, ve, ch] = await Promise.allSettled([getLocal(), getGrid(), own('skill.json'), own('obs-recent.json'), getPrecip(), getWinter(), own('aladin.json'), own('verify.json'), own('fc-changes.json')]);
   if (pr.status !== 'fulfilled') console.warn('Zrážky detailne – živé dáta zlyhali:', pr.reason);
   state.skill = sk.status === 'fulfilled' ? sk.value : null;
   state.obs = ob.status === 'fulfilled' ? ob.value : null;
   state.aladin = al.status === 'fulfilled' ? al.value : null;
+  state.verify = ve.status === 'fulfilled' ? ve.value : null;
+  state.changes = ch.status === 'fulfilled' ? ch.value : null;
   state.demo.local = lr.status !== 'fulfilled';
   state.demo.grid = gr.status !== 'fulfilled';
   if (lr.status !== 'fulfilled') console.warn('Plotiště – živé dáta zlyhali:', lr.reason);
@@ -2474,7 +2532,7 @@ async function load(force = false) {
   state.step = Math.min(state.step, state.grid.times.length - 1);
 
   state.winter = wi.status === 'fulfilled' ? wi.value : null;
-  renderWeek(); renderNow(); renderSky(); renderPrecip(); renderWinter(); renderSummary(); renderOutlook(); renderRisk(); renderSkill();
+  renderWeek(); renderNow(); renderSky(); renderPrecip(); renderWinter(); renderSummary(); renderOutlook(); renderVerify(); renderRisk(); renderSkill();
   if (!charts.length) setupCharts();
   drawCharts();
   renderLegend(); renderTimeline(); renderSystems();

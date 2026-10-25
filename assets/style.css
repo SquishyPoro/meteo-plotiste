@@ -363,6 +363,17 @@ table.pm tr.prob td.na { background: #0f1a2b; color: var(--dim); }
 .radar-note { margin-top: 5px; font: 10.5px var(--mono); color: var(--dim); }
 .map-legend .keys.rk span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
 
+/* overenie a zmeny */
+.verify { display: grid; gap: 6px; }
+table.vt td.good { color: var(--ok); }
+table.vt td.bad { color: var(--serious); }
+.vt-sum { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font: 11px var(--mono); color: var(--muted); }
+.vt-sum svg { max-width: 100%; }
+.chg-list { margin: 0; padding-left: 18px; display: grid; gap: 3px; font-size: 13px; }
+.chg { margin-left: 4px; font: 600 10px var(--mono); letter-spacing: 0; }
+.chg.up { color: #ff8a5c; }
+.chg.down { color: #5fa8ff; }
+
 /* slnko, mesiac, UV */
 .sky { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
 .sky[data-n="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -205,8 +205,27 @@ def main():
         a, b = daily(latest), daily(load(prev[1]))
         days = [{'date': d, **{k: [a[d][k], b[d][k]] for k in ('tmax', 'tmin', 'p', 'g')}} for d in sorted(a) if d in b]
         changes = {'issued': latest['issued'], 'prev': prev[0], 'days': days}
-    else:
-        changes = {'issued': latest['issued'], 'prev': None, 'days': []}
+    else:  # ešte nie je archív spred 24 h – porovnanie z Previous Runs (priemer modelov)
+        changes = {'issued': latest['issued'], 'prev': None, 'days': [], 'src': 'previous_runs'}
+        try:
+            cur, old = {'time': None, 't': [], 'p': [], 'g': []}, {'time': None, 't': [], 'p': [], 'g': []}
+            series = {}
+            for m in MODELS:
+                vars_ = ','.join(f'{v}{suf}' for v in ('temperature_2m', 'precipitation', 'wind_gusts_10m') for suf in ('', '_previous_day1'))
+                series[m] = get_json('https://previous-runs-api.open-meteo.com/v1/forecast?'
+                                     f'latitude={HK[0]}&longitude={HK[1]}&timeformat=unixtime&models={m}&forecast_days=8&hourly={vars_}')['hourly']
+            times = next(iter(series.values()))['time']
+            cur['time'] = old['time'] = times
+            for i in range(len(times)):
+                for k, v in (('t', 'temperature_2m'), ('p', 'precipitation'), ('g', 'wind_gusts_10m')):
+                    cur[k].append(mean([series[m].get(v, [None] * len(times))[i] for m in series]))
+                    old[k].append(mean([series[m].get(v + '_previous_day1', [None] * len(times))[i] for m in series]))
+            a, b = daily(cur), daily(old)
+            today = dt.datetime.now(TZ).date().isoformat()
+            changes['days'] = [{'date': d, **{k: [a[d][k], b[d][k]] for k in ('tmax', 'tmin', 'p', 'g')}} for d in sorted(a) if d in b and d >= today]
+            changes['prev'] = latest['issued'] - 86400
+        except Exception as e:
+            log('zmeny – previous runs zlyhali:', e)
     with open(os.path.join(DATA, 'fc-changes.json'), 'w') as f:
         json.dump(changes, f, separators=(',', ':'))
     # --- overenie: predpoveď na včerajšok vydaná predvčerom okolo 6:00
