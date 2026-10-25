@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Meteo Plotiště</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="theme-color" content="#060a12">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Saira+Condensed:wght@500;600&display=swap">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <h1>Meteo<span>//</span>Plotiště</h1>
+      <small id="coords">50.236° S · 15.790° V</small>
+    </div>
+    <div class="spacer"></div>
+    <span class="status" id="status" data-state="loading"><i></i><span>Načítavam</span></span>
+    <span class="updated" id="updated"></span>
+    <button class="btn" id="refresh" type="button">Obnoviť</button>
+    <span class="clock" id="clock"></span>
+  </header>
+
+  <div class="demo-note" id="demo-note" hidden>
+    Ukážkový režim: živé dáta sa nepodarilo načítať, preto sú zobrazené vymyslené ukážkové hodnoty.
+    Na adrese GitHub Pages sa načítajú skutočné predpovede z Open-Meteo.
+  </div>
+
+  <main class="windows" id="windows">
+    <!-- OKNO 1: Európa -->
+    <section class="win" id="win-europe" aria-label="Európa">
+      <div class="win-head">
+        <h2>Európa</h2>
+        <span class="sub" id="eu-sub">tlak · vietor · zrážky · búrky</span>
+        <span class="spacer"></span>
+        <div class="seg" role="group" aria-label="Vrstva mapy" id="layer-seg">
+          <button type="button" data-layer="wind" aria-pressed="true">Vietor</button>
+          <button type="button" data-layer="rain" aria-pressed="false">Zrážky</button>
+          <button type="button" data-layer="cape" aria-pressed="false">Búrky</button>
+          <button type="button" data-layer="none" aria-pressed="false">Tlak</button>
+        </div>
+        <button class="max-btn" type="button" data-max="europe" aria-label="Zväčšiť okno Európa" title="Zväčšiť / zmenšiť (Esc)">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/></svg>
+        </button>
+      </div>
+      <div class="map-wrap" id="map-wrap">
+        <canvas id="map"></canvas>
+        <div class="hk-pulse" id="hk-pulse"></div>
+        <div class="map-legend" id="map-legend"></div>
+        <div class="map-readout" id="map-readout">Prejdi myšou alebo ťukni na mapu</div>
+      </div>
+      <div class="timeline">
+        <button class="btn" type="button" id="play" aria-pressed="false">▶ Prehrať</button>
+        <input type="range" id="time" min="0" max="40" value="0" aria-label="Čas predpovede">
+        <span class="tl-label" id="tl-label"></span>
+      </div>
+      <div class="systems">
+        <h3>Sledované tlakové níže a ich dosah na Plotiště</h3>
+        <div class="sys-list" id="sys-list"><span class="empty">Načítavam…</span></div>
+      </div>
+    </section>
+
+    <!-- OKNO 2: Plotiště -->
+    <section class="win" id="win-local" aria-label="Plotiště nad Labem">
+      <div class="win-head">
+        <h2>Plotiště n. L.</h2>
+        <span class="sub">6 modelov · 3 ensemble systémy</span>
+        <span class="spacer"></span>
+        <button class="max-btn" type="button" data-max="local" aria-label="Zväčšiť okno Plotiště" title="Zväčšiť / zmenšiť (Esc)">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/></svg>
+        </button>
+      </div>
+      <div class="local-body">
+        <div class="local-side">
+          <div class="now" id="now"></div>
+          <dl class="kv" id="now-kv"></dl>
+          <div class="summary" id="summary"></div>
+          <div class="block">
+            <h3>Pravdepodobnosť javov (ensemble, 7 dní)</h3>
+            <div class="risk-wrap"><table class="risk" id="risk"></table></div>
+            <div class="risk-key">
+              <span style="--c:#0f1a2b">pod 20 %</span>
+              <span style="--c:#3a3415">20–40 %</span>
+              <span style="--c:#47250f">40–70 %</span>
+              <span style="--c:#4d1219">nad 70 %</span>
+            </div>
+          </div>
+        </div>
+        <div class="local-charts">
+          <div class="chart" id="ch-temp"></div>
+          <div class="chart" id="ch-rain"></div>
+          <div class="chart" id="ch-wind"></div>
+          <p class="foot">Zdroje: Open-Meteo (ECMWF, DWD ICON, NOAA GFS, Météo-France, UK Met Office, Kanada GEM),
+            ensemble ECMWF ENS, ICON-EPS, GEFS. Obrysy máp: Natural Earth.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="assets/europe-geo.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
