@@ -11,6 +11,7 @@
   --accent: #8fd3ff;
   --accent-ink: #04111c;
   --track: #ffb547;
+  --obs: #f2c46d;
   --sea: #070d18;
   --land-line: #4f6688;
   --border-line: #2c3d58;
@@ -261,6 +262,21 @@ table.risk td[data-level="low"] { color: var(--muted); }
 .tip .r { display: flex; justify-content: space-between; gap: 12px; }
 .tip .r span:last-child { color: var(--fg); }
 .tip hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+
+/* presnosť modelov */
+.skill-lead { font-size: 12.5px; margin: 0 0 8px; max-width: 65ch; }
+.skill-lead b { font-family: var(--mono); font-weight: 500; }
+.skill-wrap { overflow-x: auto; }
+table.skill { border-collapse: collapse; width: 100%; font: 11.5px var(--mono); font-variant-numeric: tabular-nums; }
+table.skill th { font-weight: 500; color: var(--dim); text-align: right; padding: 3px 5px; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+table.skill th:first-child, table.skill td:first-child { text-align: left; padding-left: 0; }
+table.skill td { text-align: right; padding: 5px 5px; border-top: 1px solid var(--line); white-space: nowrap; }
+table.skill td:first-child { font-family: var(--body); font-size: 12.5px; color: var(--fg); }
+table.skill td.best { color: var(--ok); }
+table.skill .w { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
+table.skill .w i { display: inline-block; height: 6px; border-radius: 1px; background: var(--accent); opacity: .85; }
+.skill-note { margin-top: 6px; font: 10.5px/1.45 var(--mono); color: var(--dim); }
+.obs-line { margin-top: 2px; font: 11px var(--mono); color: var(--obs); }
 
 .foot { color: var(--dim); font: 10.5px var(--mono); }
 .foot a { color: var(--muted); }

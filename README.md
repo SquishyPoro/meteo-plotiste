@@ -14,3 +14,14 @@ Stačí statický hosting. Na GitHube: **Settings → Pages → Deploy from bran
 Stránka potom beží na `https://<používateľ>.github.io/meteo-plotiste/`.
 
 Lokálne: `python3 -m http.server` v tomto priečinku a otvoriť http://localhost:8000.
+
+## Zber dát a AI korekcia
+
+GitHub Actions (`.github/workflows/update.yml`) každú hodinu spustí `pipeline/update.py`:
+
+1. stiahne 10-minútové merania ČHMÚ (Hradec Králové – Svobodné Dvory, záloha Nový Hradec Králové) a uloží ich ako hodinové do `data/obs/`,
+2. raz denne porovná staré predpovede 6 modelov (Open-Meteo Previous Runs API) s meraniami a uloží chyby a váhy do `data/skill.json`.
+
+Stránka z toho počíta **AI predpoveď**: každý model opraví o jeho typickú chybu v Plotišti (podľa predstihu a hodiny dňa)
+a spojí ich váženým priemerom, kde presnejšie modely majú väčšiu váhu. Panel „Presnosť modelov“ ukazuje,
+o koľko je AI za posledný týždeň lepšia alebo horšia než obyčajný priemer modelov.

@@ -22,7 +22,9 @@ const STEP_H = 3, MAX_STEPS = 41; // 0 … 120 h
 const DAYS = 7;
 
 const $ = (s) => document.querySelector(s);
-const state = { local: null, grid: null, tracks: [], layer: 'wind', step: 0, demo: { local: false, grid: false } };
+const state = { local: null, grid: null, tracks: [], layer: 'wind', step: 0, demo: { local: false, grid: false }, skill: null, obs: null };
+const OBS_COLOR = '#f2c46d';
+const AI_COLOR = '#8fd3ff';
 
 /* ------------------------------------------------------------------ pomocné */
 const fmtTime = new Intl.DateTimeFormat('sk-SK', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
@@ -336,7 +338,39 @@ function deriveLocal(L) {
       rainMed: quantile([...psum].sort((a, b) => a - b), 0.5),
     };
   });
-  return { cons, spread, band, pRain, days };
+  const ai = state.skill && !state.demo.local ? { t: aiSeries(L, state.skill, 't'), g: aiSeries(L, state.skill, 'g'), p: aiSeries(L, state.skill, 'p') } : null;
+  const obs = { t: [], gust: [], precip: [] };
+  if (state.obs && !state.demo.local) {
+    const idx = new Map(state.obs.time.map((t, i) => [t, i]));
+    for (const t of L.times) {
+      const i = idx.get(t);
+      for (const k of Object.keys(obs)) obs[k].push(i == null ? null : state.obs[k][i]);
+    }
+  }
+  return { cons, spread, band, pRain, days, ai, obs: state.obs && !state.demo.local ? obs : null };
+}
+
+/* AI predpoveď: každý model opravený o svoju typickú chybu v Plotišti (podľa predstihu a hodiny dňa),
+ * potom vážený priemer s váhami 1/MAE² z data/skill.json (počíta GitHub Actions). */
+function aiSeries(L, S, key) {
+  const now = Date.now() / 1000;
+  return L.times.map((t, i) => {
+    const lead = clamp(Math.floor((t - now) / 86400), 0, 6);
+    const W = S.weights && S.weights[key] && S.weights[key][lead];
+    if (!W) return null;
+    let s = 0, sw = 0;
+    for (const [m, w] of Object.entries(W)) {
+      const v = L.models[m] && num(L.models[m][key][i]);
+      if (v == null) continue;
+      const e = S.models[m] && S.models[m][key] && S.models[m][key][lead];
+      let c = v;
+      if (key === 't' && e && e.hour_bias) c -= e.hour_bias[Math.floor(t / 3600) % 24];
+      else if (key === 'g' && e) c -= e.bias;
+      s += c * w; sw += w;
+    }
+    if (!sw) return null;
+    return key === 't' ? s / sw : Math.max(0, s / sw);
+  });
 }
 
 /* ------------------------------------------------------------------ odvodené výpočty: tlakové níže */
@@ -707,7 +741,7 @@ function renderNow() {
   const L = state.local, c = L.current;
   const desc = WMO[c.weather_code] || '—';
   $('#now').innerHTML = `<div class="temp">${r1(c.temperature_2m)}<sup>°C</sup></div>
-    <div><div class="desc">${desc}</div><div class="feel">pocitovo ${r1(c.apparent_temperature)} °C · ${fmtTime.format(c.time * 1000)}</div></div>`;
+    <div><div class="desc">${desc}</div><div class="feel">pocitovo ${r1(c.apparent_temperature)} °C · model ${fmtTime.format(c.time * 1000)}</div>${obsLine()}</div>`;
   const dir = c.wind_direction_10m;
   const trend = c.pressure_trend;
   const trendTxt = trend == null ? '' : (trend > 0.5 ? '↗' : trend < -0.5 ? '↘' : '→') + ' ' + (trend > 0 ? '+' : '') + r1(trend);
@@ -719,6 +753,58 @@ function renderNow() {
     <div><dt>Tendencia 3 h</dt><dd>${trendTxt || '–'}<small>hPa</small></dd></div>
     <div><dt>Zrážky</dt><dd>${r1(c.precipitation)}<small>mm</small></dd></div>`;
   if (L.elevation != null) $('#coords').textContent = `50.236° S · 15.790° V · ${Math.round(L.elevation)} m n. m.`;
+}
+
+function obsLine() {
+  const O = state.obs;
+  if (!O || state.demo.local) return '';
+  for (let i = O.time.length - 1; i >= 0; i--) {
+    if (O.t[i] == null) continue;
+    const age = (Date.now() / 1000 - O.time[i]) / 3600;
+    if (age > 6) return '';
+    return `<div class="obs-line">namerané ${r1(O.t[i])} °C · nárazy ${r0(O.gust[i])} km/h · ČHMÚ ${fmtTime.format(O.time[i] * 1000)}</div>`;
+  }
+  return '';
+}
+
+const MODEL_NAME = Object.fromEntries(MODELS.map((m) => [m.id, m.name]));
+
+function renderSkill() {
+  const el = $('#skill');
+  const S = state.skill;
+  if (!S || state.demo.local) {
+    el.innerHTML = `<h3>Presnosť modelov v Plotišti</h3><p class="skill-lead">Vyhodnotenie sa zobrazí, keď GitHub Actions spracuje merania ČHMÚ (každú hodinu).</p>`;
+    return;
+  }
+  const g = (m, k, L, f = 'mae_corr') => { const e = S.models[m] && S.models[m][k] && S.models[m][k][L]; return e ? (e[f] ?? e.mae) : null; };
+  const ids = Object.keys(S.models).filter((m) => g(m, 't', 1) != null);
+  const w = S.weights.t && S.weights.t[1] || {};
+  ids.sort((a, b) => (w[b] || 0) - (w[a] || 0));
+  const best = (k, L) => ids.reduce((b, m) => (g(m, k, L) != null && (b == null || g(m, k, L) < g(b, k, L)) ? m : b), null);
+  const bt1 = best('t', 1), bt3 = best('t', 3), bg1 = best('g', 1);
+  const maxW = Math.max(...ids.map((m) => w[m] || 0), 0.01);
+  const rows = ids.map((m) => `<tr><td>${MODEL_NAME[m] || m}</td>
+    <td class="${m === bt1 ? 'best' : ''}">${r1(g(m, 't', 1))}</td>
+    <td class="${m === bt3 ? 'best' : ''}">${r1(g(m, 't', 3))}</td>
+    <td class="${m === bg1 ? 'best' : ''}">${r0(g(m, 'g', 1))}</td>
+    <td><span class="w"><i style="width:${Math.round(22 * (w[m] || 0) / maxW)}px"></i>${Math.round((w[m] || 0) * 100)} %</span></td></tr>`).join('');
+  const T = S.test || {};
+  const cmp = (k, L, unit, dec) => {
+    const x = T[k] && T[k][L]; if (!x) return null;
+    const gain = (x.mean - x.ai) / x.mean;
+    const lvl = gain > 0.02 ? 'ok' : gain < -0.02 ? 'serious' : 'warn';
+    const pctTxt = Math.abs(gain) < 0.01 ? 'bez rozdielu' : `${gain > 0 ? 'o ' + Math.round(gain * 100) + ' % lepšie' : 'o ' + Math.round(-gain * 100) + ' % horšie'}`;
+    return `<b>${r1(x.ai)}</b> vs <b>${r1(x.mean)}</b> ${unit} <span class="chip" data-level="${lvl}">${pctTxt.toUpperCase()}</span>`;
+  };
+  const ct = cmp('t', 1, '°C', true), cg = cmp('g', 1, 'km/h', false);
+  el.innerHTML = `<h3>Presnosť modelov v Plotišti · ${S.window.days} dní</h3>
+    ${ct || cg ? `<p class="skill-lead">Priemerná chyba na zajtra za posledný týždeň, AI vs. obyčajný priemer modelov:
+      ${ct ? `teplota ${ct}` : ''}${ct && cg ? ' · ' : ''}${cg ? `nárazy ${cg}` : ''}</p>` : ''}
+    <div class="skill-wrap"><table class="skill">
+      <thead><tr><th>Model</th><th title="Priemerná chyba teploty na zajtra">°C D+1</th><th title="Priemerná chyba teploty o 3 dni">°C D+3</th><th title="Priemerná chyba nárazov na zajtra">km/h D+1</th><th>Váha AI</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <div class="skill-note">Chyby po korekcii (°C, km/h); zelená = najlepší model. Merania: ${S.station}.
+      Novšie dni majú väčšiu váhu. Pretrénované ${dayLabel(S.updated)} ${fmtTime.format(S.updated * 1000)}.</div>`;
 }
 
 const HAZARDS = [
@@ -774,7 +860,7 @@ let crossIdx = null;
 function chart(el, cfg) {
   const o = { el, cfg };
   charts.push(o);
-  el.innerHTML = `<div class="chart-head"><h3>${cfg.title}</h3><div class="chart-key">${cfg.key}</div></div><svg></svg><div class="tip" hidden></div>`;
+  el.innerHTML = `<div class="chart-head"><h3>${cfg.title}</h3><div class="chart-key"></div></div><svg></svg><div class="tip" hidden></div>`;
   o.svg = d3.select(el).select('svg');
   o.tip = el.querySelector('.tip');
   const move = (ev) => {
@@ -796,6 +882,7 @@ function drawChart(o) {
   const x = d3.scaleLinear().domain([0, n - 1]).range([m.l, W - m.r]);
   const y = d3.scaleLinear().domain(cfg.domain()).nice().range([H - m.b, m.t]);
   o.x = x; o.y = y;
+  o.el.querySelector('.chart-key').innerHTML = typeof cfg.key === 'function' ? cfg.key() : cfg.key;
   const svg = o.svg.attr('viewBox', `0 0 ${W} ${H}`).attr('height', H);
   svg.selectAll('*').remove();
 
@@ -865,23 +952,33 @@ function setupCharts() {
 
   chart($('#ch-temp'), {
     title: 'Teplota [°C]', height: 170, zeroLine: true,
-    key: '<span><i style="--c:#8fd3ff"></i>konsenzus modelov</span><span><i class="thin" style="--c:#6b7a92"></i>jednotlivé modely</span><span><i class="band" style="--c:#8fd3ff"></i>ensemble 10–90 %</span>',
+    key: () => (D().ai ? '<span><i style="--c:#8fd3ff"></i>AI predpoveď</span><span><i class="thin" style="--c:#dbe5f2"></i>priemer modelov</span>' : '<span><i style="--c:#8fd3ff"></i>priemer modelov</span>')
+      + (D().obs ? `<span><i style="--c:${OBS_COLOR}"></i>namerané</span>` : '')
+      + '<span><i class="thin" style="--c:#6b7a92"></i>jednotlivé modely</span><span><i class="band" style="--c:#8fd3ff"></i>ensemble 10–90 %</span>',
     domain: () => {
-      const all = [...Object.values(L().models).flatMap((mm) => mm.t), ...D().band.t[0], ...D().band.t[1]].filter((v) => v != null);
+      const all = [...Object.values(L().models).flatMap((mm) => mm.t), ...D().band.t[0], ...D().band.t[1], ...(D().obs ? D().obs.t : [])].filter((v) => v != null);
       return [Math.min(...all) - 1, Math.max(...all) + 1];
     },
     draw: (svg, x, y) => {
       svg.append('path').attr('d', area(D().band.t[0], D().band.t[1], x, y)).attr('fill', '#8fd3ff').attr('opacity', 0.14);
       for (const mm of Object.values(L().models)) svg.append('path').attr('d', line(mm.t, x, y)).attr('fill', 'none').attr('stroke', '#6b7a92').attr('stroke-width', 1).attr('opacity', 0.55);
-      svg.append('path').attr('d', line(D().cons.t, x, y)).attr('fill', 'none').attr('stroke', '#8fd3ff').attr('stroke-width', 2);
+      if (D().ai) {
+        svg.append('path').attr('d', line(D().cons.t, x, y)).attr('fill', 'none').attr('stroke', '#dbe5f2').attr('stroke-width', 1).attr('stroke-dasharray', '3 3').attr('opacity', 0.7);
+        svg.append('path').attr('d', line(D().ai.t, x, y)).attr('fill', 'none').attr('stroke', AI_COLOR).attr('stroke-width', 2);
+      } else {
+        svg.append('path').attr('d', line(D().cons.t, x, y)).attr('fill', 'none').attr('stroke', AI_COLOR).attr('stroke-width', 2);
+      }
+      if (D().obs) svg.append('path').attr('d', line(D().obs.t, x, y)).attr('fill', 'none').attr('stroke', OBS_COLOR).attr('stroke-width', 2);
     },
-    value: (i) => D().cons.t[i],
-    tip: (i) => row('Konsenzus', r1(D().cons.t[i]) + ' °C') + row('Ensemble 10–90 %', `${r1(D().band.t[0][i])} – ${r1(D().band.t[1][i])}`) + '<hr>' + modelRows('t', (v) => r1(v) + ' °C'),
+    value: (i) => (D().ai ? D().ai.t[i] : D().cons.t[i]),
+    tip: (i) => (D().obs && D().obs.t[i] != null ? row('Namerané', r1(D().obs.t[i]) + ' °C') : '')
+      + (D().ai ? row('AI predpoveď', r1(D().ai.t[i]) + ' °C') : '') + row('Priemer modelov', r1(D().cons.t[i]) + ' °C')
+      + row('Ensemble 10–90 %', `${r1(D().band.t[0][i])} – ${r1(D().band.t[1][i])}`) + '<hr>' + modelRows('t', (v) => r1(v) + ' °C'),
   });
 
   chart($('#ch-rain'), {
     title: 'Zrážky [mm/h]', height: 130,
-    key: '<span><i class="band" style="--c:#8f9cff"></i>konsenzus modelov</span><span>pásik = pravdepodobnosť zrážok (ensemble)</span>',
+    key: '<span><i class="band" style="--c:#8f9cff"></i>priemer modelov</span><span>pásik = pravdepodobnosť zrážok (ensemble)</span>',
     domain: () => [0, Math.max(1, ...D().cons.p.filter((v) => v != null)) * 1.1],
     draw: (svg, x, y, W, H, m) => {
       const bw = Math.max(1, (x(1) - x(0)) - 1);
@@ -898,13 +995,16 @@ function setupCharts() {
       });
     },
     value: (i) => D().cons.p[i],
-    tip: (i) => row('Konsenzus', r1(D().cons.p[i]) + ' mm') + row('Pravdep. zrážok', pct(D().pRain[i])) + '<hr>' + modelRows('p', (v) => r1(v) + ' mm'),
+    tip: (i) => (D().obs && D().obs.precip[i] != null ? row('Namerané', r1(D().obs.precip[i]) + ' mm') : '')
+      + row('Priemer modelov', r1(D().cons.p[i]) + ' mm') + row('Pravdep. zrážok', pct(D().pRain[i])) + '<hr>' + modelRows('p', (v) => r1(v) + ' mm'),
   });
 
   chart($('#ch-wind'), {
     title: 'Nárazy vetra [km/h]', height: 150,
-    key: '<span><i style="--c:#5fc0f0"></i>konsenzus</span><span><i class="band" style="--c:#5fc0f0"></i>ensemble 10–90 %</span><span><i class="thin" style="--c:#ff8a3d"></i>prahy 60 / 90</span>',
-    domain: () => [0, Math.max(70, ...D().band.g[1].filter((v) => v != null), ...D().cons.g.filter((v) => v != null)) + 5],
+    key: () => (D().ai ? '<span><i style="--c:#5fc0f0"></i>AI predpoveď</span>' : '<span><i style="--c:#5fc0f0"></i>priemer modelov</span>')
+      + (D().obs ? `<span><i style="--c:${OBS_COLOR}"></i>namerané</span>` : '')
+      + '<span><i class="band" style="--c:#5fc0f0"></i>ensemble 10–90 %</span><span><i class="thin" style="--c:#ff8a3d"></i>prahy 60 / 90</span>',
+    domain: () => [0, Math.max(70, ...D().band.g[1].filter((v) => v != null), ...D().cons.g.filter((v) => v != null), ...(D().obs ? D().obs.gust.filter((v) => v != null) : [])) + 5],
     draw: (svg, x, y, W, H, m) => {
       svg.append('path').attr('d', area(D().band.g[0], D().band.g[1], x, y)).attr('fill', '#5fc0f0').attr('opacity', 0.14);
       for (const [v, lab] of [[60, 'silný vietor'], [90, 'víchrica']]) {
@@ -912,10 +1012,13 @@ function setupCharts() {
         svg.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(v)).attr('y2', y(v)).attr('stroke', '#ff8a3d').attr('stroke-dasharray', '4 4').attr('opacity', 0.6);
         svg.append('text').attr('x', W - m.r - 2).attr('y', y(v) - 3).attr('text-anchor', 'end').text(lab);
       }
-      svg.append('path').attr('d', line(D().cons.g, x, y)).attr('fill', 'none').attr('stroke', '#5fc0f0').attr('stroke-width', 2);
+      svg.append('path').attr('d', line(D().ai ? D().ai.g : D().cons.g, x, y)).attr('fill', 'none').attr('stroke', '#5fc0f0').attr('stroke-width', 2);
+      if (D().obs) svg.append('path').attr('d', line(D().obs.gust, x, y)).attr('fill', 'none').attr('stroke', OBS_COLOR).attr('stroke-width', 1.5);
     },
-    value: (i) => D().cons.g[i],
-    tip: (i) => row('Konsenzus', r0(D().cons.g[i]) + ' km/h') + row('Ensemble 10–90 %', `${r0(D().band.g[0][i])} – ${r0(D().band.g[1][i])}`) + '<hr>' + modelRows('g', (v) => r0(v) + ' km/h'),
+    value: (i) => (D().ai ? D().ai.g : D().cons.g)[i],
+    tip: (i) => (D().obs && D().obs.gust[i] != null ? row('Namerané', r0(D().obs.gust[i]) + ' km/h') : '')
+      + (D().ai ? row('AI predpoveď', r0(D().ai.g[i]) + ' km/h') : '') + row('Priemer modelov', r0(D().cons.g[i]) + ' km/h')
+      + row('Ensemble 10–90 %', `${r0(D().band.g[0][i])} – ${r0(D().band.g[1][i])}`) + '<hr>' + modelRows('g', (v) => r0(v) + ' km/h'),
   });
 }
 
@@ -945,7 +1048,10 @@ async function load(force = false) {
     cacheSet('mp-grid-v1', { ...d, P: d.P.map((a) => Array.from(a, (v) => Math.round(v * 10) / 10)), G: d.G.map((a) => Array.from(a, Math.round)), R: d.R.map((a) => Array.from(a, (v) => Math.round(v * 10) / 10)), C: d.C.map((a) => Array.from(a, Math.round)) });
     return d;
   };
-  const [lr, gr] = await Promise.allSettled([getLocal(), getGrid()]);
+  const own = (f) => fetchJSON(`data/${f}?v=${Math.floor(Date.now() / 600000)}`, 15000);
+  const [lr, gr, sk, ob] = await Promise.allSettled([getLocal(), getGrid(), own('skill.json'), own('obs-recent.json')]);
+  state.skill = sk.status === 'fulfilled' ? sk.value : null;
+  state.obs = ob.status === 'fulfilled' ? ob.value : null;
   state.demo.local = lr.status !== 'fulfilled';
   state.demo.grid = gr.status !== 'fulfilled';
   if (lr.status !== 'fulfilled') console.warn('Plotiště – živé dáta zlyhali:', lr.reason);
@@ -956,7 +1062,7 @@ async function load(force = false) {
   state.tracks = buildTracks(state.grid);
   state.step = Math.min(state.step, state.grid.times.length - 1);
 
-  renderNow(); renderSummary(); renderRisk();
+  renderNow(); renderSummary(); renderRisk(); renderSkill();
   if (!charts.length) setupCharts();
   drawCharts();
   renderLegend(); renderTimeline(); renderSystems();
