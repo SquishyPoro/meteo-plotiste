@@ -101,6 +101,27 @@ function cacheGet(key, maxAgeMin) {
     return o.data;
   } catch { return null; }
 }
+// posledná uložená verzia bez ohľadu na vek (pre režim bez signálu, max. 3 dni)
+function cacheGetStale(key) {
+  try {
+    const o = JSON.parse(localStorage.getItem(key) || 'null');
+    return o && Date.now() - o.at < 3 * 86400000 ? o : null;
+  } catch { return null; }
+}
+async function liveOrStale(key, maxAgeMin, force, loader, revive = (d) => d) {
+  const fresh = !force && cacheGet(key, maxAgeMin);
+  if (fresh) return revive(fresh);
+  try {
+    const d = await loader();
+    return d;
+  } catch (e) {
+    const old = cacheGetStale(key);
+    if (!old) throw e;
+    state.staleAt = Math.min(state.staleAt || Infinity, old.at);
+    return revive(old.data);
+  }
+}
+
 function cacheSet(key, data) {
   try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), data })); } catch { /* plné alebo blokované */ }
 }
@@ -1658,31 +1679,29 @@ function renderWarnings() {
 function setStatus() {
   const st = $('#status');
   const demo = state.demo.local || state.demo.grid;
-  st.dataset.state = demo ? 'demo' : 'live';
-  st.querySelector('span').textContent = demo ? tx('Ukážkové dáta', 'Ukázková data') : tx('Živé dáta', 'Živá data');
+  const stale = !demo && state.staleAt;
+  st.dataset.state = demo ? 'demo' : stale ? 'offline' : 'live';
+  st.querySelector('span').textContent = demo ? tx('Ukážkové dáta', 'Ukázková data')
+    : stale ? tx('Offline · dáta z ', 'Offline · data z ') + fmtTime.format(state.staleAt) : tx('Živé dáta', 'Živá data');
   $('#demo-note').hidden = !demo;
   $('#updated').textContent = tx('aktualizované ', 'aktualizováno ') + fmtTime.format(Date.now());
 }
 
 async function load(force = false) {
   const st = $('#status'); st.dataset.state = 'loading'; st.querySelector('span').textContent = tx('Načítavam', 'Načítám');
-  const getLocal = async () => {
-    const c = !force && cacheGet('mp-local-v1', 30);
-    if (c) return c;
+  state.staleAt = null;
+  const getLocal = () => liveOrStale('mp-local-v1', 30, force, async () => {
     const d = await loadLocalLive(); cacheSet('mp-local-v1', d); return d;
-  };
-  const getGrid = async () => {
-    const c = !force && cacheGet('mp-grid-v1', 60);
-    if (c) return { ...c, P: c.P.map((a) => Float32Array.from(Object.values(a))), G: c.G.map((a) => Float32Array.from(Object.values(a))), R: c.R.map((a) => Float32Array.from(Object.values(a))), C: c.C.map((a) => Float32Array.from(Object.values(a))) };
+  });
+  const reviveGrid = (c) => ({ ...c, P: c.P.map((a) => Float32Array.from(Object.values(a))), G: c.G.map((a) => Float32Array.from(Object.values(a))), R: c.R.map((a) => Float32Array.from(Object.values(a))), C: c.C.map((a) => Float32Array.from(Object.values(a))) });
+  const getGrid = () => liveOrStale('mp-grid-v1', 60, force, async () => {
     const d = await loadGridLive();
     cacheSet('mp-grid-v1', { ...d, P: d.P.map((a) => Array.from(a, (v) => Math.round(v * 10) / 10)), G: d.G.map((a) => Array.from(a, Math.round)), R: d.R.map((a) => Array.from(a, (v) => Math.round(v * 10) / 10)), C: d.C.map((a) => Array.from(a, Math.round)) });
     return d;
-  };
-  const getPrecip = async () => {
-    const c = !force && cacheGet('mp-precip-v1', 10);
-    if (c) return c;
+  }, reviveGrid);
+  const getPrecip = () => liveOrStale('mp-precip-v1', 10, force, async () => {
     const d = await loadPrecipLive(); cacheSet('mp-precip-v1', d); return d;
-  };
+  });
   const own = (f) => fetchJSON(`data/${f}?v=${Math.floor(Date.now() / 600000)}`, 15000);
   const [lr, gr, sk, ob, pr] = await Promise.allSettled([getLocal(), getGrid(), own('skill.json'), own('obs-recent.json'), getPrecip()]);
   if (pr.status !== 'fulfilled') console.warn('Zrážky detailne – živé dáta zlyhali:', pr.reason);
@@ -1748,8 +1767,26 @@ function applyLang() {
   });
 }
 
+function setupPwa() {
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service worker:', e));
+  }
+  let prompt = null;
+  const btn = $('#install');
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); prompt = e; btn.hidden = false; });
+  window.addEventListener('appinstalled', () => { btn.hidden = true; prompt = null; });
+  btn.addEventListener('click', async () => {
+    if (!prompt) return;
+    prompt.prompt();
+    await prompt.userChoice.catch(() => null);
+    prompt = null; btn.hidden = true;
+  });
+  window.addEventListener('online', () => load());
+}
+
 function init() {
   applyLang();
+  setupPwa();
   const tick = () => { $('#clock').textContent = new Intl.DateTimeFormat(LOCALE, { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date()); };
   tick(); setInterval(tick, 1000);
   renderLegend();

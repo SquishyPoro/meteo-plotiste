@@ -73,6 +73,8 @@ button { font: inherit; color: inherit; }
 .status[data-state="live"] i { background: var(--ok); box-shadow: 0 0 8px var(--ok); animation: blink 2.4s infinite; }
 .status[data-state="demo"] { color: var(--warn); border-color: #4a4120; }
 .status[data-state="demo"] i { background: var(--warn); }
+.status[data-state="offline"] { color: var(--warn); border-color: #4a4120; }
+.status[data-state="offline"] i { background: var(--warn); }
 .status[data-state="loading"] i { background: var(--accent); animation: blink .8s infinite; }
 .clock { font: 500 13px var(--mono); color: var(--fg); font-variant-numeric: tabular-nums; }
 .updated { font: 11px var(--mono); color: var(--dim); }

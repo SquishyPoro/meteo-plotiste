@@ -6,6 +6,13 @@
 <title>Meteo Plotiště</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="theme-color" content="#060a12">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/favicon-64.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Meteo">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Saira+Condensed:wght@500;600&display=swap">
@@ -22,6 +29,7 @@
     <span class="status" id="status" data-state="loading"><i></i><span data-cs="Načítám">Načítavam</span></span>
     <span class="updated" id="updated"></span>
     <div class="seg" role="group" aria-label="Jazyk" id="lang-seg"><button type="button" data-lang="sk" aria-pressed="true">SK</button><button type="button" data-lang="cs" aria-pressed="false">CZ</button></div>
+    <button class="btn" id="install" type="button" hidden data-cs="Nainstalovat">Inštalovať</button>
     <button class="btn" id="refresh" type="button" data-cs="Obnovit">Obnoviť</button>
     <span class="clock" id="clock"></span>
   </header>
