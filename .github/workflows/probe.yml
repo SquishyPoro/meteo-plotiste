@@ -10,29 +10,18 @@ jobs:
         run: |
           set +e
           mkdir out && cd out
-          pip install -q pillow
           curl -sS -m 30 https://api.rainviewer.com/public/weather-maps.json -o rv.json
-          curl -sS -m 30 https://www.rainviewer.com/files/rainviewer_api_colors_table.csv -o colors.csv
-          cat > a.py <<'PY'
-          import json, urllib.request, io, collections
-          from PIL import Image
-          d = json.load(open('rv.json')); P = d['host'] + d['radar']['past'][-1]['path']
-          out = open('analysis.txt', 'w')
-          out.write(json.dumps({k: (v if k != 'radar' else {'past': len(v['past']), 'first': v['past'][0]['time'], 'last': v['past'][-1]['time']}) for k, v in d.items()}) + '\n')
-          for scheme in (0, 2):
-            for z, x, y in ((7, 69, 43), (6, 34, 21), (8, 139, 87)):
-              url = f'{P}/256/{z}/{x}/{y}/{scheme}/0_0.png'
-              try:
-                raw = urllib.request.urlopen(url, timeout=30).read()
-                im = Image.open(io.BytesIO(raw)); out.write(f'{url} mode={im.mode} size={im.size}\n')
-                im = im.convert('RGBA'); c = collections.Counter(im.getdata())
-                out.write('  colors: ' + str(c.most_common(25)) + '\n')
-                im.save(f'tile-s{scheme}-z{z}.png')
-              except Exception as e:
-                out.write(f'{url} ERR {e}\n')
+          python3 - <<'PY'
+          import json, urllib.request, os
+          d = json.load(open('rv.json'))
+          for f in d['radar']['past'][-7:]:
+            for x in (68, 69, 70):
+              for y in (42, 43, 44):
+                path = f"{f['path']}/256/7/{x}/{y}/2/0_0.png"
+                os.makedirs('tiles' + os.path.dirname(path), exist_ok=True)
+                open('tiles' + path, 'wb').write(urllib.request.urlopen(d['host'] + path, timeout=30).read())
           PY
-          python3 a.py
-          cd .. && git init -q probe && cp out/*.txt out/*.png out/*.csv probe/ 2>/dev/null; true && cd probe
+          cd .. && git init -q probe && cp -r out/rv.json out/tiles probe/ && cd probe
           git config user.name probe && git config user.email probe@users.noreply.github.com
           git add -A && git commit -qm probe
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" HEAD:refs/heads/probe-out
