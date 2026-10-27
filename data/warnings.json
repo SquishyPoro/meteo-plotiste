@@ -1,11 +1,11 @@
 {
- "updated": 1792923465,
+ "updated": 1793120845,
  "area": "ORP Hradec Králové",
  "warnings": [
   {
    "event": "Hydrologické sucho",
    "level": "orange",
-   "onset": "2026-10-20T14:00:00+02:00",
+   "onset": "2026-10-27T13:00:00+01:00",
    "expires": "",
    "certainty": "Observed",
    "description": "V reprezentativním hydrologickém profilu pro dané ORP poklesla hladina vodního toku na úroveň indikující sucho a zároveň zde poklesla i hladina podzemní vody v mělkých zvodních na úroveň indikující sucho.",
