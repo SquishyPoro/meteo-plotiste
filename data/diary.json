@@ -1,11 +1,17 @@
 {
-"updated": 1793101860,
+"updated": 1793175159,
 "events": [
 {
 "date": "2026-10-25",
 "type": "rec_p",
 "text": "Rekordné zrážky pre 25. 10.: 16,2 mm",
 "text_cs": "Rekordní srážky pro 25. 10.: 16,2 mm"
+},
+{
+"date": "2026-10-27",
+"type": "first_frost",
+"text": "Prvý mráz sezóny: -0,1 °C",
+"text_cs": "První mráz sezóny: -0,1 °C"
 }
 ]
 }
