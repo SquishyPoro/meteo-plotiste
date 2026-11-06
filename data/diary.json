@@ -1,5 +1,5 @@
 {
-"updated": 1793915946,
+"updated": 1793992149,
 "events": [
 {
 "date": "2026-10-25",
@@ -18,6 +18,12 @@
 "type": "year_hi",
 "text": "Najteplejší deň roka 2026 zatiaľ: 9,5 °C",
 "text_cs": "Nejteplejší den roku 2026 zatím: 9,5 °C"
+},
+{
+"date": "2026-11-05",
+"type": "first_frost",
+"text": "Prvý mráz sezóny: -2,3 °C",
+"text_cs": "První mráz sezóny: -2,3 °C"
 }
 ]
 }
