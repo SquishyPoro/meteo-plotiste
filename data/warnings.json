@@ -1,5 +1,5 @@
 {
- "updated": 1795343320,
+ "updated": 1795426732,
  "area": "ORP Hradec Králové",
  "warnings": [
   {
@@ -20,7 +20,7 @@
    "expires": "2026-11-27T08:00:00+01:00",
    "certainty": "Unknown",
    "description": "Ve čtvrtek 26. 11. očekáváme tvorbu sněhové pokrývky a s ní spojené komplikace v dopravě. Velmi výrazné komplikace jsou pravděpodobné zejména v jihovýchodní polovině území, kde může napadnout i v nižších polohách přes 10 cm sněhu. Toto je předběžné varování, doporučujeme sledovat aktualizované předpovědi a výstrahy.\n\nPravděpodobné komplikace v dopravě, energetice a dalších odvětvích.",
-   "instruction": "Sledovat výstrahy v mobilní aplikaci ČHMÚ nebo na webových stránkách www.chmi.cz.",
+   "instruction": "Sledovat výstrahy v mobilní aplikaci ČHMÚ nebo na webových stránkách vystrahy-cr.chmi.cz.",
    "situation": "",
    "web": "https://vystrahy-cr.chmi.cz/"
   }
