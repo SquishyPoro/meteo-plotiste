@@ -1,27 +1,27 @@
 {
- "updated": 1795426732,
+ "updated": 1795551919,
  "area": "ORP Hradec Králové",
  "warnings": [
   {
-   "event": "Hydrologické sucho",
-   "level": "orange",
-   "onset": "2026-11-10T13:00:00+01:00",
+   "event": "Stav sucha",
+   "level": "yellow",
+   "onset": "2026-11-24T13:00:00+01:00",
    "expires": "",
    "certainty": "Observed",
-   "description": "V reprezentativním hydrologickém profilu pro dané ORP poklesla hladina vodního toku na úroveň indikující sucho a zároveň zde poklesla i hladina podzemní vody v mělkých zvodních na úroveň indikující sucho.",
-   "instruction": "Užívání nebo nakládání s povrchovými i podzemními vodami musí být v souladu s Vodním zákonem, případně krajským plánem pro zvládání sucha a stavu nedostatku vody.",
+   "description": "V reprezentativním hydrologickém profilu pro dané ORP poklesla hladina vodního toku na úroveň indikující sucho nebo zde poklesla i hladina podzemní vody v mělkých zvodních na úroveň indikující sucho.",
+   "instruction": "Užívání nebo nakládání s povrchovými nebo podzemními vodami musí být v souladu s Vodním zákonem, případně krajským plánem pro zvládání sucha a stavu nedostatku vody.",
    "situation": "",
    "web": "https://hamr.chmi.cz/"
   },
   {
-   "event": "Výhled jevů",
+   "event": "Rizikové sněhové jevy",
    "level": "yellow",
-   "onset": "2026-11-26T00:00:00+01:00",
-   "expires": "2026-11-27T08:00:00+01:00",
-   "certainty": "Unknown",
-   "description": "Ve čtvrtek 26. 11. očekáváme tvorbu sněhové pokrývky a s ní spojené komplikace v dopravě. Velmi výrazné komplikace jsou pravděpodobné zejména v jihovýchodní polovině území, kde může napadnout i v nižších polohách přes 10 cm sněhu. Toto je předběžné varování, doporučujeme sledovat aktualizované předpovědi a výstrahy.\n\nPravděpodobné komplikace v dopravě, energetice a dalších odvětvích.",
-   "instruction": "Sledovat výstrahy v mobilní aplikaci ČHMÚ nebo na webových stránkách vystrahy-cr.chmi.cz.",
-   "situation": "",
+   "onset": "2026-11-26T06:00:00+01:00",
+   "expires": "2026-11-27T06:00:00+01:00",
+   "certainty": "Likely",
+   "description": "Sněžení s tvorbou sněhové pokrývky o výšce 4 až 10 cm.\nPravděpodobné komplikace v silniční dopravě. Hůře sjízdné a schůdné trasy a komunikace, zhoršená viditelnost, omezení v řízení vozidla. Předpoklad omezení provozu na některých komunikacích, zpoždění spojů a pravděpodobný výskyt dopravních nehod.",
+   "instruction": "Jezdit a chodit velmi opatrně, přizpůsobit jízdu stavu komunikace. Sledovat dopravní zpravodajství. Nutnou výbavou jsou zimní pneumatiky se zákonem stanovenou minimální hloubkou dezénu pro zimní podmínky, na horách i sněhové řetězy. Na horách dodržovat pokyny Horské služby.",
+   "situation": "Počasí u nás výrazně ovlivní tlaková níže nad severní Itálií,",
    "web": "https://vystrahy-cr.chmi.cz/"
   }
  ]
