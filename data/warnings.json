@@ -1,5 +1,5 @@
 {
- "updated": 1795551919,
+ "updated": 1795613854,
  "area": "ORP Hradec Králové",
  "warnings": [
   {
@@ -16,12 +16,12 @@
   {
    "event": "Rizikové sněhové jevy",
    "level": "yellow",
-   "onset": "2026-11-26T06:00:00+01:00",
-   "expires": "2026-11-27T06:00:00+01:00",
+   "onset": "2026-11-26T17:00:00+01:00",
+   "expires": "2026-11-27T09:00:00+01:00",
    "certainty": "Likely",
-   "description": "Sněžení s tvorbou sněhové pokrývky o výšce 4 až 10 cm.\nPravděpodobné komplikace v silniční dopravě. Hůře sjízdné a schůdné trasy a komunikace, zhoršená viditelnost, omezení v řízení vozidla. Předpoklad omezení provozu na některých komunikacích, zpoždění spojů a pravděpodobný výskyt dopravních nehod.",
+   "description": "Sněžení s tvorbou sněhové pokrývky o výšce 3 až 10 cm. V kombinaci prachového sněhu a silnějšího větru se budou tvořit sněhové jazyky. Pravděpodobné komplikace v silniční dopravě. Hůře sjízdné a schůdné trasy a komunikace, zhoršená viditelnost, omezení v řízení vozidla. Předpoklad omezení provozu na některých komunikacích, zpoždění spojů a pravděpodobný výskyt dopravních nehod.",
    "instruction": "Jezdit a chodit velmi opatrně, přizpůsobit jízdu stavu komunikace. Sledovat dopravní zpravodajství. Nutnou výbavou jsou zimní pneumatiky se zákonem stanovenou minimální hloubkou dezénu pro zimní podmínky, na horách i sněhové řetězy. Na horách dodržovat pokyny Horské služby.",
-   "situation": "Počasí u nás výrazně ovlivní tlaková níže nad severní Itálií,",
+   "situation": "Počasí u nás bude ovlivňovat tlaková níže nad severní Itálií.",
    "web": "https://vystrahy-cr.chmi.cz/"
   }
  ]
